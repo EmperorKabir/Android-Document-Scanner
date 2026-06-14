@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -29,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
@@ -64,6 +66,7 @@ fun HomeScreen(
     onImportPdf: (Uri) -> Unit,
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onMerge: (String, String) -> Unit,
 ) {
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
@@ -72,6 +75,7 @@ fun HomeScreen(
         ActivityResultContracts.GetContent(),
     ) { uri -> if (uri != null) onImportPdf(uri) }
     var importMenu by remember { mutableStateOf(false) }
+    var mergeSource by remember { mutableStateOf<String?>(null) }
 
     val columns = when (windowSizeClass.widthSizeClass) {
         WindowWidthSizeClass.Compact -> 2
@@ -141,10 +145,44 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(documents, key = { it.id }) { doc ->
-                    DocumentCard(doc, store, onOpen, onDelete)
+                    DocumentCard(
+                        doc = doc,
+                        store = store,
+                        onOpen = onOpen,
+                        onDelete = onDelete,
+                        onMergeRequest = { mergeSource = it },
+                    )
                 }
             }
         }
+    }
+
+    mergeSource?.let { sourceId ->
+        val targets = documents.filter { it.id != sourceId }
+        AlertDialog(
+            onDismissRequest = { mergeSource = null },
+            title = { Text(stringResource(R.string.merge_dialog_title)) },
+            text = {
+                Column {
+                    if (targets.isEmpty()) {
+                        Text(stringResource(R.string.merge_none))
+                    } else {
+                        targets.forEach { target ->
+                            TextButton(onClick = {
+                                onMerge(sourceId, target.id)
+                                mergeSource = null
+                            }) {
+                                Text(target.title, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { mergeSource = null }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
     }
 }
 
@@ -155,6 +193,7 @@ private fun DocumentCard(
     store: DocumentStore,
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onMergeRequest: (String) -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val thumbFile = doc.pages.firstOrNull()?.let { store.thumbFile(doc.id, it.id) }
@@ -197,6 +236,13 @@ private fun DocumentCard(
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.action_merge)) },
+                onClick = {
+                    menu = false
+                    onMergeRequest(doc.id)
+                },
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_delete)) },
                 onClick = {

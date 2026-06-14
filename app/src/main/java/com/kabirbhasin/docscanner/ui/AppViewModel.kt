@@ -181,6 +181,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { store.delete(documentId) }
     }
 
+    fun mergeInto(sourceId: String, targetId: String) {
+        if (sourceId == targetId) return
+        viewModelScope.launch {
+            val source = store.document(sourceId) ?: return@launch
+            val target = store.document(targetId) ?: return@launch
+            val newPages = source.pages.mapNotNull { page ->
+                val bitmap = store.loadBitmap(store.pageFile(sourceId, page.id)) ?: return@mapNotNull null
+                val pageId = store.newPageId()
+                store.savePageImage(targetId, pageId, bitmap)
+                PageMeta(pageId, page.filter)
+            }
+            store.upsert(target.copy(pages = target.pages + newPages, updatedAt = System.currentTimeMillis()))
+            store.delete(sourceId)
+        }
+    }
+
     fun setWatermark(documentId: String, text: String) {
         viewModelScope.launch {
             val doc = store.document(documentId) ?: return@launch

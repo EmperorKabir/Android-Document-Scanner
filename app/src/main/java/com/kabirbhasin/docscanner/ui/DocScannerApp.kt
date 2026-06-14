@@ -40,6 +40,7 @@ fun DocScannerApp(
             onImportPdf = viewModel::importPdf,
             onOpen = viewModel::openDocument,
             onDelete = viewModel::deleteDocument,
+            onMerge = viewModel::mergeInto,
         )
 
         is Screen.Camera -> {
