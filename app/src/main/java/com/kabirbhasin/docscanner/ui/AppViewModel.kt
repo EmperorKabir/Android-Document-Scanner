@@ -84,7 +84,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val now = System.currentTimeMillis()
             val existing = store.document(documentId)
             val base = existing ?: DocumentMeta(documentId, defaultTitle(now), now, now)
-            store.upsert(base.copy(pages = base.pages + PageMeta(pageId), updatedAt = now))
+            store.upsert(base.copy(pages = base.pages + PageMeta(pageId, FilterType.MAGIC), updatedAt = now))
             screen = Screen.Review(documentId)
         }
     }

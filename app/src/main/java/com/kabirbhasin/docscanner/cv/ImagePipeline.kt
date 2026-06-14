@@ -7,7 +7,6 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import com.kabirbhasin.docscanner.model.FilterType
-import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -17,11 +16,13 @@ import kotlin.math.roundToInt
  */
 object ImagePipeline {
 
-    private const val DETECT_EDGE = 420
+    private const val DETECT_EDGE = 480
 
     /**
-     * Estimate the page rectangle from luminance-gradient projections. Falls back to a small
-     * inset when the borders are not clearly separable; the user can always adjust the corners.
+     * Locate the page as the largest contrasting region (Otsu segmentation + connected
+     * components), then take its four extreme corners — which recovers a rotated/skewed
+     * quad. Falls back to a small inset when no clear page is found; the user can always
+     * fine-tune the corners afterwards.
      */
     fun detectPage(bitmap: Bitmap): Quad {
         val scale = DETECT_EDGE.toFloat() / maxOf(bitmap.width, bitmap.height)
@@ -31,36 +32,18 @@ object ImagePipeline {
         val pixels = IntArray(w * h)
         small.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        val lum = FloatArray(w * h)
+        val gray = IntArray(w * h)
         for (i in pixels.indices) {
             val c = pixels[i]
-            lum[i] = 0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+            gray[i] = (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)).toInt()
         }
 
-        val colEnergy = FloatArray(w)
-        val rowEnergy = FloatArray(h)
-        for (y in 1 until h - 1) {
-            val row = y * w
-            for (x in 1 until w - 1) {
-                colEnergy[x] += abs(lum[row + x + 1] - lum[row + x - 1])
-                rowEnergy[y] += abs(lum[row + w + x] - lum[row - w + x])
-            }
-        }
+        val threshold = otsu(gray)
+        val best = listOf(true, false)
+            .mapNotNull { bright -> largestRegionQuad(gray, w, h, threshold, bright) }
+            .maxByOrNull { it.areaFraction }
 
-        val left = strongestEdge(colEnergy, 0, (w * 0.45f).toInt())
-        val right = strongestEdge(colEnergy, (w * 0.55f).toInt(), w)
-        val top = strongestEdge(rowEnergy, 0, (h * 0.45f).toInt())
-        val bottom = strongestEdge(rowEnergy, (h * 0.55f).toInt(), h)
-
-        val separable = left != null && right != null && top != null && bottom != null &&
-            right!! - left!! > w * 0.3f && bottom!! - top!! > h * 0.3f
-        if (!separable) return insetQuad()
-
-        val lx = left!! / w.toFloat()
-        val rx = right!! / w.toFloat()
-        val ty = top!! / h.toFloat()
-        val by = bottom!! / h.toFloat()
-        return Quad(Corner(lx, ty), Corner(rx, ty), Corner(rx, by), Corner(lx, by))
+        return if (best != null && best.areaFraction >= 0.18f) best.quad else insetQuad()
     }
 
     /** Perspective-correct the [quad] region into a flat rectangle. */
@@ -95,25 +78,114 @@ object ImagePipeline {
         FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
     }
 
-    private fun strongestEdge(energy: FloatArray, from: Int, to: Int): Int? {
-        val end = to.coerceAtMost(energy.size)
-        if (from >= end) return null
-        val mean = energy.average().toFloat()
-        var best = -1
-        var bestValue = 0f
-        for (i in from until end) {
-            if (energy[i] > bestValue && energy[i] > mean * 1.5f) {
-                bestValue = energy[i]
-                best = i
+    // ---- Detection internals --------------------------------------------------
+
+    private class Detection(val quad: Quad, val areaFraction: Float)
+
+    /**
+     * Label connected foreground pixels for the chosen polarity and return the largest
+     * region of plausible page size, described by its four extreme corners.
+     */
+    private fun largestRegionQuad(gray: IntArray, w: Int, h: Int, t: Int, bright: Boolean): Detection? {
+        val n = w * h
+        val fg = BooleanArray(n) { if (bright) gray[it] > t else gray[it] <= t }
+        val visited = BooleanArray(n)
+        val stack = IntArray(n)
+
+        var bestArea = 0
+        var bestCorners: IntArray? = null
+
+        for (start in 0 until n) {
+            if (!fg[start] || visited[start]) continue
+            var sp = 0
+            stack[sp++] = start
+            visited[start] = true
+            var area = 0
+            var minSum = Int.MAX_VALUE
+            var maxSum = Int.MIN_VALUE
+            var minDiff = Int.MAX_VALUE
+            var maxDiff = Int.MIN_VALUE
+            var tl = start
+            var br = start
+            var tr = start
+            var bl = start
+            while (sp > 0) {
+                val p = stack[--sp]
+                val x = p % w
+                val y = p / w
+                area++
+                val sum = x + y
+                val diff = x - y
+                if (sum < minSum) { minSum = sum; tl = p }
+                if (sum > maxSum) { maxSum = sum; br = p }
+                if (diff > maxDiff) { maxDiff = diff; tr = p }
+                if (diff < minDiff) { minDiff = diff; bl = p }
+                if (x > 0) { val q = p - 1; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (x < w - 1) { val q = p + 1; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (y > 0) { val q = p - w; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (y < h - 1) { val q = p + w; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+            }
+            val frac = area.toFloat() / n
+            if (frac in 0.18f..0.95f && area > bestArea) {
+                // Solidity rejects the hollow background frame (whose extreme corners are the
+                // image corners) in favour of the solid, convex page region.
+                val quadArea = quadAreaPx(tl, tr, br, bl, w)
+                if (quadArea > 0f && area / quadArea >= 0.75f) {
+                    bestArea = area
+                    bestCorners = intArrayOf(tl, tr, br, bl)
+                }
             }
         }
-        return if (best >= 0) best else null
+
+        val corners = bestCorners ?: return null
+        val quad = Quad.of(corners.map { Corner((it % w) / w.toFloat(), (it / w) / h.toFloat()) })
+        return Detection(quad, bestArea.toFloat() / n)
+    }
+
+    private fun otsu(gray: IntArray): Int {
+        val hist = IntArray(256)
+        for (g in gray) hist[g.coerceIn(0, 255)]++
+        val total = gray.size
+        var sum = 0.0
+        for (i in 0..255) sum += i.toDouble() * hist[i]
+        var sumB = 0.0
+        var weightB = 0
+        var maxVar = 0.0
+        var threshold = 127
+        for (i in 0..255) {
+            weightB += hist[i]
+            if (weightB == 0) continue
+            val weightF = total - weightB
+            if (weightF == 0) break
+            sumB += i.toDouble() * hist[i]
+            val meanB = sumB / weightB
+            val meanF = (sum - sumB) / weightF
+            val between = weightB.toDouble() * weightF * (meanB - meanF) * (meanB - meanF)
+            if (between > maxVar) {
+                maxVar = between
+                threshold = i
+            }
+        }
+        return threshold
+    }
+
+    private fun quadAreaPx(tl: Int, tr: Int, br: Int, bl: Int, w: Int): Float {
+        val xs = floatArrayOf((tl % w).toFloat(), (tr % w).toFloat(), (br % w).toFloat(), (bl % w).toFloat())
+        val ys = floatArrayOf((tl / w).toFloat(), (tr / w).toFloat(), (br / w).toFloat(), (bl / w).toFloat())
+        var a = 0f
+        for (i in 0 until 4) {
+            val j = (i + 1) % 4
+            a += xs[i] * ys[j] - xs[j] * ys[i]
+        }
+        return kotlin.math.abs(a) / 2f
     }
 
     private fun insetQuad(): Quad {
         val m = 0.06f
         return Quad(Corner(m, m), Corner(1f - m, m), Corner(1f - m, 1f - m), Corner(m, 1f - m))
     }
+
+    // ---- Filter internals -----------------------------------------------------
 
     private fun withColorMatrix(src: Bitmap, matrix: ColorMatrix): Bitmap {
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
@@ -123,8 +195,8 @@ object ImagePipeline {
     }
 
     private fun magicMatrix(): ColorMatrix {
-        val contrast = 1.25f
-        val translate = (-0.5f * contrast + 0.5f) * 255f
+        val contrast = 1.35f
+        val translate = (-0.5f * contrast + 0.5f) * 255f + 12f
         val matrix = ColorMatrix(
             floatArrayOf(
                 contrast, 0f, 0f, 0f, translate,
@@ -133,7 +205,7 @@ object ImagePipeline {
                 0f, 0f, 0f, 1f, 0f,
             ),
         )
-        matrix.postConcat(ColorMatrix().apply { setSaturation(1.15f) })
+        matrix.postConcat(ColorMatrix().apply { setSaturation(1.18f) })
         return matrix
     }
 
@@ -170,11 +242,11 @@ object ImagePipeline {
                 val x1 = (x - radius).coerceAtLeast(0)
                 val x2 = (x + radius).coerceAtMost(w - 1)
                 val area = (x2 - x1 + 1).toLong() * (y2 - y1 + 1)
-                val sum = integral[(y2 + 1) * stride + (x2 + 1)] -
+                val s = integral[(y2 + 1) * stride + (x2 + 1)] -
                     integral[y1 * stride + (x2 + 1)] -
                     integral[(y2 + 1) * stride + x1] +
                     integral[y1 * stride + x1]
-                val mean = sum.toDouble() / area
+                val mean = s.toDouble() / area
                 val v = if (gray[y * w + x] > mean * cFactor) 0xFF else 0x00
                 out[y * w + x] = (0xFF shl 24) or (v shl 16) or (v shl 8) or v
             }
