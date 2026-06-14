@@ -41,6 +41,7 @@
     <string name="export_pdf_fit">PDF · fit page</string>
     <string name="export_images">Share as images</string>
     <string name="action_watermark">Watermark</string>
+    <string name="action_id_card">Combine to ID card</string>
     <string name="watermark_hint">Watermark text (blank to remove)</string>
     <string name="flash_off">Flash off</string>
     <string name="flash_auto">Flash auto</string>

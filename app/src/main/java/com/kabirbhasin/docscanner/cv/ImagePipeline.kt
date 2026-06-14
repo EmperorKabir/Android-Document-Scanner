@@ -70,6 +70,31 @@ object ImagePipeline {
         FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
     }
 
+    /** Combine two card sides (front, back) onto one A4-proportioned white page. */
+    fun combineCards(front: Bitmap, back: Bitmap): Bitmap {
+        val pageW = maxOf(front.width, back.width).coerceAtLeast(1)
+        val pageH = (pageW * 1.414f).toInt().coerceAtLeast(1)
+        val out = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        out.eraseColor(android.graphics.Color.WHITE)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val margin = pageW * 0.05f
+        drawFitted(canvas, front, margin, pageH * 0.06f, pageW - margin, pageH * 0.48f, paint)
+        drawFitted(canvas, back, margin, pageH * 0.52f, pageW - margin, pageH * 0.94f, paint)
+        return out
+    }
+
+    private fun drawFitted(canvas: Canvas, bitmap: Bitmap, l: Float, t: Float, r: Float, b: Float, paint: Paint) {
+        val availW = r - l
+        val availH = b - t
+        val scale = minOf(availW / bitmap.width, availH / bitmap.height)
+        val dw = bitmap.width * scale
+        val dh = bitmap.height * scale
+        val left = l + (availW - dw) / 2f
+        val top = t + (availH - dh) / 2f
+        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, top, left + dw, top + dh), paint)
+    }
+
     // ---- Detection internals --------------------------------------------------
 
     private class Detection(val quad: Quad, val areaFraction: Float)

@@ -79,6 +79,7 @@ fun ReviewScreen(
     onRetake: (String) -> Unit,
     onRename: (String) -> Unit,
     onSetWatermark: (String) -> Unit,
+    onCombineIdCard: () -> Unit,
 ) {
     if (document == null || document.pages.isEmpty()) {
         LaunchedEffect(Unit) { onBack() }
@@ -152,6 +153,15 @@ fun ReviewScreen(
                                 showWatermark = true
                             },
                         )
+                        if (pages.size >= 2) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_id_card)) },
+                                onClick = {
+                                    exportMenu = false
+                                    onCombineIdCard()
+                                },
+                            )
+                        }
                     }
                 },
             )

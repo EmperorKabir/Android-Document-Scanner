@@ -83,6 +83,7 @@ fun DocScannerApp(
             onRetake = { pageId -> viewModel.startRetake(s.documentId, pageId) },
             onRename = { title -> viewModel.renameDocument(s.documentId, title) },
             onSetWatermark = { text -> viewModel.setWatermark(s.documentId, text) },
+            onCombineIdCard = { viewModel.combineIdCard(s.documentId) },
         )
 
         is Screen.Signature -> SignatureScreen(

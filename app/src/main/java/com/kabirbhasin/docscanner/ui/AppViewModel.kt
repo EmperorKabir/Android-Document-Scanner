@@ -206,6 +206,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { store.delete(documentId) }
     }
 
+    fun combineIdCard(documentId: String) {
+        viewModelScope.launch {
+            val doc = store.document(documentId) ?: return@launch
+            if (doc.pages.size < 2) return@launch
+            val front = store.loadBitmap(store.pageFile(documentId, doc.pages[0].id)) ?: return@launch
+            val back = store.loadBitmap(store.pageFile(documentId, doc.pages[1].id)) ?: return@launch
+            val combined = withContext(Dispatchers.Default) { ImagePipeline.combineCards(front, back) }
+            val newPageId = store.newPageId()
+            store.savePageImage(documentId, newPageId, combined)
+            store.deletePageImage(documentId, doc.pages[0].id)
+            store.deletePageImage(documentId, doc.pages[1].id)
+            val pages = listOf(PageMeta(newPageId, FilterType.ORIGINAL)) + doc.pages.drop(2)
+            store.upsert(doc.copy(pages = pages, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
     fun mergeInto(sourceId: String, targetId: String) {
         if (sourceId == targetId) return
         viewModelScope.launch {
