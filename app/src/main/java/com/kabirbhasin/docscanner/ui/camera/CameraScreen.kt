@@ -123,6 +123,11 @@ fun CameraScreen(
     val capturing = remember { AtomicBoolean(false) }
     var detection by remember { mutableStateOf<DetectedFrame?>(null) }
     val stability = remember { Stability() }
+    val armed = remember { AtomicBoolean(false) }
+    LaunchedEffect(Unit) {
+        delay(2200)
+        armed.set(true)
+    }
 
     val capture = rememberUpdatedState { batch: Boolean ->
         if (capturing.compareAndSet(false, true)) {
@@ -162,7 +167,7 @@ fun CameraScreen(
             val prev = stability.last
             stability.count = if (prev != null && quadDelta(prev, quad) < 0.025f) stability.count + 1 else 1
             stability.last = quad
-            if (stability.count >= AUTO_CAPTURE_FRAMES && !capturing.get()) {
+            if (armed.get() && stability.count >= AUTO_CAPTURE_FRAMES && !capturing.get()) {
                 stability.count = 0
                 capture.value.invoke(batchMode)
             }

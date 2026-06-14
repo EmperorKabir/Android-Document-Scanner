@@ -65,8 +65,8 @@ object ImagePipeline {
     fun applyFilter(bitmap: Bitmap, filter: FilterType): Bitmap = when (filter) {
         FilterType.ORIGINAL -> bitmap
         FilterType.GREYSCALE -> withColorMatrix(bitmap, ColorMatrix().apply { setSaturation(0f) })
-        FilterType.MAGIC -> magicScan(bitmap, 0.97f)
-        FilterType.LIGHTEN -> magicScan(bitmap, 1.08f)
+        FilterType.MAGIC -> magicScan(bitmap, 0.66f)
+        FilterType.LIGHTEN -> magicScan(bitmap, 0.5f)
         FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
     }
 
@@ -312,7 +312,7 @@ object ImagePipeline {
      * then divide each pixel by it. This whitens the paper, removes shadows and uneven lighting, and
      * preserves ink — the look of a sheet scanned on a flatbed.
      */
-    private fun magicScan(src: Bitmap, gainFactor: Float): Bitmap {
+    private fun magicScan(src: Bitmap, blackPoint: Float): Bitmap {
         val w = src.width
         val h = src.height
         val sw = (w / 10).coerceAtLeast(1)
@@ -324,7 +324,7 @@ object ImagePipeline {
         val px = IntArray(w * h)
         src.getPixels(px, 0, w, 0, 0, w, h)
         val out = IntArray(w * h)
-        val gain = 255f * gainFactor
+        val range = (1f - blackPoint).coerceAtLeast(0.01f)
         for (y in 0 until h) {
             val sy = (y * sh / h).coerceIn(0, sh - 1)
             for (x in 0 until w) {
@@ -334,9 +334,9 @@ object ImagePipeline {
                 val br = ((b shr 16) and 0xFF).coerceAtLeast(1)
                 val bgC = ((b shr 8) and 0xFF).coerceAtLeast(1)
                 val bb = (b and 0xFF).coerceAtLeast(1)
-                val r = (((p shr 16) and 0xFF) * gain / br).toInt().coerceIn(0, 255)
-                val g = (((p shr 8) and 0xFF) * gain / bgC).toInt().coerceIn(0, 255)
-                val bl = ((p and 0xFF) * gain / bb).toInt().coerceIn(0, 255)
+                val r = stretch(((p shr 16) and 0xFF).toFloat() / br, blackPoint, range)
+                val g = stretch(((p shr 8) and 0xFF).toFloat() / bgC, blackPoint, range)
+                val bl = stretch((p and 0xFF).toFloat() / bb, blackPoint, range)
                 out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
             }
         }
@@ -344,6 +344,14 @@ object ImagePipeline {
         result.setPixels(out, 0, w, 0, 0, w, h)
         return result
     }
+
+    /**
+     * Normalise the page-relative ratio: pixels at or above the local paper brightness map to white,
+     * pixels below [blackPoint] of it map to black, with a linear ramp between — whitening the paper
+     * while darkening ink so faint marks stay legible.
+     */
+    private fun stretch(ratio: Float, blackPoint: Float, range: Float): Int =
+        (((ratio - blackPoint) / range).coerceIn(0f, 1f) * 255f).toInt()
 
     /** Local adaptive threshold using an integral image, producing a clean bi-level scan. */
     private fun adaptiveThreshold(src: Bitmap): Bitmap {
