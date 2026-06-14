@@ -12,6 +12,7 @@
     <string name="action_retake">Retake</string>
     <string name="action_use">Use</string>
     <string name="action_capture">Capture</string>
+    <string name="action_done">Done</string>
     <string name="empty_title">No documents yet</string>
     <string name="empty_subtitle">Tap Scan to capture your first page.</string>
     <string name="preview_placeholder">Select a document to preview</string>
@@ -22,8 +23,15 @@
     <string name="camera_permission_rationale">Camera access is needed to scan documents.</string>
     <string name="grant_access">Grant access</string>
     <string name="rename_hint">Document name</string>
-    <string name="export_pdf">Share as PDF</string>
+    <string name="export_pdf_a4">PDF · A4</string>
+    <string name="export_pdf_letter">PDF · Letter</string>
+    <string name="export_pdf_fit">PDF · fit page</string>
     <string name="export_images">Share as images</string>
+    <string name="action_watermark">Watermark</string>
+    <string name="watermark_hint">Watermark text (blank to remove)</string>
+    <string name="flash_off">Flash off</string>
+    <string name="flash_auto">Flash auto</string>
+    <string name="flash_on">Flash on</string>
     <string name="pages_one">1 page</string>
     <string name="pages_other">%1$d pages</string>
     <string name="page_position">%1$d / %2$d</string>

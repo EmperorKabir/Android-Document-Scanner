@@ -63,6 +63,7 @@ fun DocScannerApp(
             onMovePage = { pageId, delta -> viewModel.movePage(s.documentId, pageId, delta) },
             onRotate = { pageId -> viewModel.rotatePage(s.documentId, pageId) },
             onRename = { title -> viewModel.renameDocument(s.documentId, title) },
+            onSetWatermark = { text -> viewModel.setWatermark(s.documentId, text) },
         )
     }
 }

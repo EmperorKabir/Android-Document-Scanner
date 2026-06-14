@@ -149,6 +149,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { store.delete(documentId) }
     }
 
+    fun setWatermark(documentId: String, text: String) {
+        viewModelScope.launch {
+            val doc = store.document(documentId) ?: return@launch
+            store.upsert(doc.copy(watermark = text.trim().ifBlank { null }, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
     private fun goReviewOrHome(documentId: String) {
         screen = if (store.document(documentId) != null) Screen.Review(documentId) else Screen.Home
     }

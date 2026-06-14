@@ -19,4 +19,5 @@ data class DocumentMeta(
     val createdAt: Long,
     val updatedAt: Long,
     val pages: List<PageMeta> = emptyList(),
+    val watermark: String? = null,
 )

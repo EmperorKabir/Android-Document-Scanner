@@ -21,6 +21,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.kabirbhasin.docscanner.R
 import com.kabirbhasin.docscanner.data.DocumentStore
 import com.kabirbhasin.docscanner.export.Exporter
+import com.kabirbhasin.docscanner.export.PageSize
 import com.kabirbhasin.docscanner.model.DocumentMeta
 import com.kabirbhasin.docscanner.model.FilterType
 import com.kabirbhasin.docscanner.ui.rememberFilteredPage
@@ -66,6 +68,7 @@ fun ReviewScreen(
     onMovePage: (String, Int) -> Unit,
     onRotate: (String) -> Unit,
     onRename: (String) -> Unit,
+    onSetWatermark: (String) -> Unit,
 ) {
     if (document == null || document.pages.isEmpty()) {
         LaunchedEffect(Unit) { onBack() }
@@ -76,6 +79,7 @@ fun ReviewScreen(
     val pages = document.pages
     val pagerState = rememberPagerState(pageCount = { pages.size })
     var showRename by remember { mutableStateOf(false) }
+    var showWatermark by remember { mutableStateOf(false) }
     var exportMenu by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -98,16 +102,23 @@ fun ReviewScreen(
                         Icon(painterResource(R.drawable.ic_export), stringResource(R.string.action_export))
                     }
                     DropdownMenu(expanded = exportMenu, onDismissRequest = { exportMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.export_pdf)) },
-                            onClick = {
-                                exportMenu = false
-                                scope.launch {
-                                    val uri = Exporter.exportPdf(context, store, document)
-                                    if (uri != null) Exporter.shareSingle(context, uri, "application/pdf")
-                                }
-                            },
+                        val pdfItems = listOf(
+                            R.string.export_pdf_a4 to PageSize.A4,
+                            R.string.export_pdf_letter to PageSize.LETTER,
+                            R.string.export_pdf_fit to PageSize.FIT,
                         )
+                        pdfItems.forEach { (label, size) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(label)) },
+                                onClick = {
+                                    exportMenu = false
+                                    scope.launch {
+                                        val uri = Exporter.exportPdf(context, store, document, size)
+                                        if (uri != null) Exporter.shareSingle(context, uri, "application/pdf")
+                                    }
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.export_images)) },
                             onClick = {
@@ -116,6 +127,14 @@ fun ReviewScreen(
                                     val uris = Exporter.exportImages(context, store, document)
                                     Exporter.shareMultiple(context, uris, "image/jpeg")
                                 }
+                            },
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_watermark)) },
+                            onClick = {
+                                exportMenu = false
+                                showWatermark = true
                             },
                         )
                     }
@@ -196,6 +215,52 @@ fun ReviewScreen(
             },
         )
     }
+
+    if (showWatermark) {
+        TextEntryDialog(
+            title = stringResource(R.string.action_watermark),
+            hint = stringResource(R.string.watermark_hint),
+            initial = document.watermark ?: "",
+            confirmLabel = stringResource(R.string.action_done),
+            allowBlank = true,
+            onDismiss = { showWatermark = false },
+            onConfirm = {
+                onSetWatermark(it)
+                showWatermark = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun TextEntryDialog(
+    title: String,
+    hint: String,
+    initial: String,
+    confirmLabel: String,
+    allowBlank: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = { Text(hint) },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }, enabled = allowBlank || text.isNotBlank()) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    )
 }
 
 @Composable

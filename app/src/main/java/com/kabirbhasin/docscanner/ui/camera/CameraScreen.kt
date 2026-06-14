@@ -98,6 +98,8 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
     val imageCapture = remember {
         ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build()
     }
+    var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
+    LaunchedEffect(flashMode) { imageCapture.flashMode = flashMode }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val capturing = remember { AtomicBoolean(false) }
     var detection by remember { mutableStateOf<DetectedFrame?>(null) }
@@ -186,6 +188,31 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
         )
 
         QuadOverlay(detection, Modifier.fillMaxSize())
+
+        TextButton(
+            onClick = {
+                flashMode = when (flashMode) {
+                    ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+                    ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+                    else -> ImageCapture.FLASH_MODE_OFF
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .safeDrawingPadding()
+                .padding(8.dp),
+        ) {
+            Text(
+                text = stringResource(
+                    when (flashMode) {
+                        ImageCapture.FLASH_MODE_AUTO -> R.string.flash_auto
+                        ImageCapture.FLASH_MODE_ON -> R.string.flash_on
+                        else -> R.string.flash_off
+                    },
+                ),
+                color = Color.White,
+            )
+        }
 
         Row(
             modifier = Modifier
