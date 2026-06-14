@@ -10,4 +10,5 @@ sealed interface Screen {
         val rawPath: String,
     ) : Screen
     data class Review(val documentId: String) : Screen
+    data class Signature(val documentId: String, val pageId: String) : Screen
 }

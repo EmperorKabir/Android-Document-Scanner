@@ -1,6 +1,7 @@
 package com.kabirbhasin.docscanner.ui
 
 import android.app.Application
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.getValue
@@ -131,6 +132,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val doc = store.document(documentId) ?: return@launch
             val pages = doc.pages.map { if (it.id == pageId) it.copy(filter = filter) else it }
             store.upsert(doc.copy(pages = pages, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    fun startSignature(documentId: String, pageId: String) {
+        screen = Screen.Signature(documentId, pageId)
+    }
+
+    fun applySignature(documentId: String, pageId: String, signature: Bitmap) {
+        viewModelScope.launch {
+            store.stampSignature(documentId, pageId, signature)
+            val doc = store.document(documentId) ?: return@launch
+            val pages = doc.pages.map { if (it.id == pageId) it.copy(rev = it.rev + 1) else it }
+            store.upsert(doc.copy(pages = pages, updatedAt = System.currentTimeMillis()))
+            screen = Screen.Review(documentId)
         }
     }
 

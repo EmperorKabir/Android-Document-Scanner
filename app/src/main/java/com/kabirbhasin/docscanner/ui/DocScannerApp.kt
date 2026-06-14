@@ -11,6 +11,7 @@ import com.kabirbhasin.docscanner.ui.camera.CameraScreen
 import com.kabirbhasin.docscanner.ui.crop.CropScreen
 import com.kabirbhasin.docscanner.ui.home.HomeScreen
 import com.kabirbhasin.docscanner.ui.review.ReviewScreen
+import com.kabirbhasin.docscanner.ui.signature.SignatureScreen
 
 @Composable
 fun DocScannerApp(
@@ -25,6 +26,7 @@ fun DocScannerApp(
             is Screen.Camera -> if (s.isNewDocument) viewModel.goHome() else viewModel.openDocument(s.documentId)
             is Screen.Crop -> viewModel.cancelCrop(s.documentId, s.rawPath)
             is Screen.Review -> viewModel.goHome()
+            is Screen.Signature -> viewModel.openDocument(s.documentId)
             Screen.Home -> Unit
         }
     }
@@ -77,8 +79,14 @@ fun DocScannerApp(
             onDeletePage = { pageId -> viewModel.deletePage(s.documentId, pageId) },
             onMovePage = { pageId, delta -> viewModel.movePage(s.documentId, pageId, delta) },
             onRotate = { pageId -> viewModel.rotatePage(s.documentId, pageId) },
+            onSign = { pageId -> viewModel.startSignature(s.documentId, pageId) },
             onRename = { title -> viewModel.renameDocument(s.documentId, title) },
             onSetWatermark = { text -> viewModel.setWatermark(s.documentId, text) },
+        )
+
+        is Screen.Signature -> SignatureScreen(
+            onDone = { bitmap -> viewModel.applySignature(s.documentId, s.pageId, bitmap) },
+            onCancel = { viewModel.openDocument(s.documentId) },
         )
     }
 }

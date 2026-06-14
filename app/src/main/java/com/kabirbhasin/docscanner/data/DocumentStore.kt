@@ -49,6 +49,33 @@ class DocumentStore private constructor(context: Context) {
             }
         }
 
+    suspend fun stampSignature(documentId: String, pageId: String, signature: Bitmap) =
+        withContext(Dispatchers.IO) {
+            val page = loadBitmap(pageFile(documentId, pageId)) ?: return@withContext
+            val out = page.copy(Bitmap.Config.ARGB_8888, true)
+            val canvas = android.graphics.Canvas(out)
+            val targetW = out.width / 3f
+            val scale = targetW / signature.width
+            val sw = signature.width * scale
+            val sh = signature.height * scale
+            val left = out.width - sw - out.width * 0.05f
+            val top = out.height - sh - out.height * 0.05f
+            canvas.drawBitmap(
+                signature,
+                null,
+                android.graphics.RectF(left, top, left + sw, top + sh),
+                android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG),
+            )
+            pageFile(documentId, pageId).outputStream().use {
+                out.compress(Bitmap.CompressFormat.JPEG, 92, it)
+            }
+            val thumb = scaleTo(out, 480)
+            thumbFile(documentId, pageId).outputStream().use {
+                thumb.compress(Bitmap.CompressFormat.JPEG, 80, it)
+            }
+            Unit
+        }
+
     suspend fun rotatePage(documentId: String, pageId: String, degrees: Int) =
         withContext(Dispatchers.IO) {
             val source = loadBitmap(pageFile(documentId, pageId)) ?: return@withContext

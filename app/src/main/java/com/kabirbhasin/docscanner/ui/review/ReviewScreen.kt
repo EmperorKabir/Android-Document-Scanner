@@ -67,6 +67,7 @@ fun ReviewScreen(
     onDeletePage: (String) -> Unit,
     onMovePage: (String, Int) -> Unit,
     onRotate: (String) -> Unit,
+    onSign: (String) -> Unit,
     onRename: (String) -> Unit,
     onSetWatermark: (String) -> Unit,
 ) {
@@ -195,6 +196,9 @@ fun ReviewScreen(
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = { onRotate(current.id) }) {
                         Icon(painterResource(R.drawable.ic_rotate), stringResource(R.string.action_rotate))
+                    }
+                    IconButton(onClick = { onSign(current.id) }) {
+                        Icon(painterResource(R.drawable.ic_sign), stringResource(R.string.action_sign))
                     }
                     IconButton(onClick = { onDeletePage(current.id) }) {
                         Icon(painterResource(R.drawable.ic_delete), stringResource(R.string.action_delete))

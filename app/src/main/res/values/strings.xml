@@ -12,6 +12,8 @@
     <string name="action_delete">Delete</string>
     <string name="action_rename">Rename</string>
     <string name="action_rotate">Rotate</string>
+    <string name="action_sign">Sign</string>
+    <string name="action_clear">Clear</string>
     <string name="action_export">Export</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_retake">Retake</string>
