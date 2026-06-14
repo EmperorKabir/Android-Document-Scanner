@@ -102,6 +102,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun rotatePage(documentId: String, pageId: String) {
+        viewModelScope.launch {
+            store.rotatePage(documentId, pageId, 90)
+            val doc = store.document(documentId) ?: return@launch
+            val pages = doc.pages.map { if (it.id == pageId) it.copy(rev = it.rev + 1) else it }
+            store.upsert(doc.copy(pages = pages, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
     fun deletePage(documentId: String, pageId: String) {
         viewModelScope.launch {
             val doc = store.document(documentId) ?: return@launch

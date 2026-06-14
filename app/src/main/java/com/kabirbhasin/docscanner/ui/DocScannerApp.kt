@@ -61,6 +61,7 @@ fun DocScannerApp(
             onSetFilter = { pageId, filter -> viewModel.setPageFilter(s.documentId, pageId, filter) },
             onDeletePage = { pageId -> viewModel.deletePage(s.documentId, pageId) },
             onMovePage = { pageId, delta -> viewModel.movePage(s.documentId, pageId, delta) },
+            onRotate = { pageId -> viewModel.rotatePage(s.documentId, pageId) },
             onRename = { title -> viewModel.renameDocument(s.documentId, title) },
         )
     }

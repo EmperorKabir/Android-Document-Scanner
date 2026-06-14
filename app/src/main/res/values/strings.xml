@@ -6,6 +6,7 @@
     <string name="action_add_page">Add page</string>
     <string name="action_delete">Delete</string>
     <string name="action_rename">Rename</string>
+    <string name="action_rotate">Rotate</string>
     <string name="action_export">Export</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_retake">Retake</string>

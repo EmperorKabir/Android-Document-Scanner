@@ -23,7 +23,7 @@ fun rememberImageFile(file: File?): State<Bitmap?> =
 
 @Composable
 fun rememberFilteredPage(store: DocumentStore, documentId: String, page: PageMeta): State<Bitmap?> =
-    produceState<Bitmap?>(initialValue = null, key1 = documentId, key2 = page.id, key3 = page.filter) {
+    produceState<Bitmap?>(null, documentId, page.id, page.filter, page.rev) {
         val original = withContext(Dispatchers.IO) { store.loadBitmap(store.pageFile(documentId, page.id)) }
         value = if (original == null) null
         else withContext(Dispatchers.Default) { ImagePipeline.applyFilter(original, page.filter) }

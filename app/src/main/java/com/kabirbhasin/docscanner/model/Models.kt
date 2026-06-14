@@ -9,6 +9,7 @@ enum class FilterType { ORIGINAL, GREYSCALE, BLACK_WHITE, MAGIC }
 data class PageMeta(
     val id: String,
     val filter: FilterType = FilterType.ORIGINAL,
+    val rev: Int = 0,
 )
 
 @Serializable

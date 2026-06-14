@@ -64,6 +64,7 @@ fun ReviewScreen(
     onSetFilter: (String, FilterType) -> Unit,
     onDeletePage: (String) -> Unit,
     onMovePage: (String, Int) -> Unit,
+    onRotate: (String) -> Unit,
     onRename: (String) -> Unit,
 ) {
     if (document == null || document.pages.isEmpty()) {
@@ -173,6 +174,9 @@ fun ReviewScreen(
                         )
                     }
                     Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { onRotate(current.id) }) {
+                        Icon(painterResource(R.drawable.ic_rotate), stringResource(R.string.action_rotate))
+                    }
                     IconButton(onClick = { onDeletePage(current.id) }) {
                         Icon(painterResource(R.drawable.ic_delete), stringResource(R.string.action_delete))
                     }

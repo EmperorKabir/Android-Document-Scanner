@@ -49,6 +49,21 @@ class DocumentStore private constructor(context: Context) {
             }
         }
 
+    suspend fun rotatePage(documentId: String, pageId: String, degrees: Int) =
+        withContext(Dispatchers.IO) {
+            val source = loadBitmap(pageFile(documentId, pageId)) ?: return@withContext
+            val matrix = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
+            val rotated = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+            pageFile(documentId, pageId).outputStream().use {
+                rotated.compress(Bitmap.CompressFormat.JPEG, 92, it)
+            }
+            val thumb = scaleTo(rotated, 480)
+            thumbFile(documentId, pageId).outputStream().use {
+                thumb.compress(Bitmap.CompressFormat.JPEG, 80, it)
+            }
+            Unit
+        }
+
     suspend fun deletePageImage(documentId: String, pageId: String) =
         withContext(Dispatchers.IO) {
             pageFile(documentId, pageId).delete()
