@@ -13,6 +13,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,8 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,13 +38,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -51,6 +58,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kabirbhasin.docscanner.R
 import com.kabirbhasin.docscanner.cv.ImagePipeline
 import com.kabirbhasin.docscanner.cv.Quad
+import com.kabirbhasin.docscanner.ui.rememberImageFile
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -59,9 +69,16 @@ import kotlin.math.abs
 private data class DetectedFrame(val quad: Quad, val srcW: Int, val srcH: Int)
 
 private const val AUTO_CAPTURE_FRAMES = 11
+private const val BATCH_COOLDOWN_MS = 900L
 
 @Composable
-fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
+fun CameraScreen(
+    pageCount: Int,
+    lastThumb: File?,
+    onCaptured: (File, Boolean) -> Unit,
+    onDone: () -> Unit,
+    onCancel: () -> Unit,
+) {
     val context = LocalContext.current
     var hasPermission by remember {
         mutableStateOf(
@@ -95,16 +112,19 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     val imageCapture = remember {
         ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build()
     }
     var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     LaunchedEffect(flashMode) { imageCapture.flashMode = flashMode }
+    var batchMode by remember { mutableStateOf(false) }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val capturing = remember { AtomicBoolean(false) }
     var detection by remember { mutableStateOf<DetectedFrame?>(null) }
+    val stability = remember { Stability() }
 
-    val capture = rememberUpdatedState {
+    val capture = rememberUpdatedState { batch: Boolean ->
         if (capturing.compareAndSet(false, true)) {
             val file = File(context.cacheDir, "cap_${System.nanoTime()}.jpg")
             val options = ImageCapture.OutputFileOptions.Builder(file).build()
@@ -113,7 +133,15 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageSavedCallback {
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        onCaptured(file)
+                        onCaptured(file, batch)
+                        if (batch) {
+                            stability.count = 0
+                            stability.last = null
+                            scope.launch {
+                                delay(BATCH_COOLDOWN_MS)
+                                capturing.set(false)
+                            }
+                        }
                     }
 
                     override fun onError(exception: ImageCaptureException) {
@@ -124,7 +152,6 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
         }
     }
 
-    val stability = remember { Stability() }
     val onFrame = rememberUpdatedState<(DetectedFrame?) -> Unit> { frame ->
         detection = frame
         val quad = frame?.quad
@@ -135,9 +162,9 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
             val prev = stability.last
             stability.count = if (prev != null && quadDelta(prev, quad) < 0.025f) stability.count + 1 else 1
             stability.last = quad
-            if (stability.count >= AUTO_CAPTURE_FRAMES) {
+            if (stability.count >= AUTO_CAPTURE_FRAMES && !capturing.get()) {
                 stability.count = 0
-                capture.value.invoke()
+                capture.value.invoke(batchMode)
             }
         }
     }
@@ -189,6 +216,25 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
 
         QuadOverlay(detection, Modifier.fillMaxSize())
 
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .safeDrawingPadding()
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = !batchMode,
+                onClick = { batchMode = false },
+                label = { Text(stringResource(R.string.mode_single)) },
+            )
+            FilterChip(
+                selected = batchMode,
+                onClick = { batchMode = true },
+                label = { Text(stringResource(R.string.mode_batch)) },
+            )
+        }
+
         TextButton(
             onClick = {
                 flashMode = when (flashMode) {
@@ -223,15 +269,35 @@ fun CameraScreen(onCaptured: (File) -> Unit, onCancel: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onCancel) {
-                Text(stringResource(R.string.action_cancel), color = Color.White)
+            if (batchMode && pageCount > 0) {
+                val thumb by rememberImageFile(lastThumb)
+                Box(Modifier.size(72.dp).clip(RoundedCornerShape(6.dp))) {
+                    thumb?.let {
+                        Image(
+                            bitmap = it.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                }
+            } else {
+                TextButton(onClick = onCancel) {
+                    Text(stringResource(R.string.action_cancel), color = Color.White)
+                }
             }
+
             FilledIconButton(
-                onClick = { capture.value.invoke() },
+                onClick = { capture.value.invoke(batchMode) },
                 modifier = Modifier.size(72.dp),
                 shape = CircleShape,
             ) {}
-            Spacer(Modifier.size(72.dp))
+
+            if (batchMode && pageCount > 0) {
+                Button(onClick = onDone) { Text(stringResource(R.string.batch_done, pageCount)) }
+            } else {
+                Spacer(Modifier.size(72.dp))
+            }
         }
     }
 }

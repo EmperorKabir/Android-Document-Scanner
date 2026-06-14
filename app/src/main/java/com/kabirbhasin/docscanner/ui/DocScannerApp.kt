@@ -41,10 +41,23 @@ fun DocScannerApp(
             onDelete = viewModel::deleteDocument,
         )
 
-        is Screen.Camera -> CameraScreen(
-            onCaptured = { file -> viewModel.onCaptured(s.documentId, s.isNewDocument, file) },
-            onCancel = { if (s.isNewDocument) viewModel.goHome() else viewModel.openDocument(s.documentId) },
-        )
+        is Screen.Camera -> {
+            val workingDoc = documents.firstOrNull { it.id == s.documentId }
+            val lastPage = workingDoc?.pages?.lastOrNull()
+            CameraScreen(
+                pageCount = workingDoc?.pages?.size ?: 0,
+                lastThumb = lastPage?.let { viewModel.store.thumbFile(s.documentId, it.id) },
+                onCaptured = { file, batch ->
+                    if (batch) viewModel.addBatchPage(s.documentId, file)
+                    else viewModel.onCaptured(s.documentId, s.isNewDocument, file)
+                },
+                onDone = {
+                    if ((workingDoc?.pages?.size ?: 0) > 0) viewModel.openDocument(s.documentId)
+                    else viewModel.goHome()
+                },
+                onCancel = { if (s.isNewDocument) viewModel.goHome() else viewModel.openDocument(s.documentId) },
+            )
+        }
 
         is Screen.Crop -> CropScreen(
             rawImagePath = s.rawPath,

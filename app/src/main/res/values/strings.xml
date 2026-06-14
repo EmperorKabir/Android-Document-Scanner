@@ -13,6 +13,9 @@
     <string name="action_use">Use</string>
     <string name="action_capture">Capture</string>
     <string name="action_done">Done</string>
+    <string name="mode_single">Single</string>
+    <string name="mode_batch">Batch</string>
+    <string name="batch_done">Done · %1$d</string>
     <string name="empty_title">No documents yet</string>
     <string name="empty_subtitle">Tap Scan to capture your first page.</string>
     <string name="preview_placeholder">Select a document to preview</string>

@@ -54,6 +54,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.Crop(documentId, pageId, isNewDocument, raw.absolutePath)
     }
 
+    fun addBatchPage(documentId: String, captured: File) {
+        viewModelScope.launch {
+            val raw = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(captured.absolutePath) }
+            withContext(Dispatchers.IO) { captured.delete() }
+            if (raw == null) return@launch
+            val pageId = store.newPageId()
+            val quad = withContext(Dispatchers.Default) { ImagePipeline.detectPage(raw) }
+            val warped = withContext(Dispatchers.Default) { ImagePipeline.warp(raw, quad) }
+            store.savePageImage(documentId, pageId, warped)
+            val now = System.currentTimeMillis()
+            val existing = store.document(documentId)
+            val base = existing ?: DocumentMeta(documentId, defaultTitle(now), now, now)
+            store.upsert(base.copy(pages = base.pages + PageMeta(pageId, FilterType.MAGIC), updatedAt = now))
+        }
+    }
+
     fun importImage(uri: Uri) {
         viewModelScope.launch {
             val pageId = store.newPageId()
