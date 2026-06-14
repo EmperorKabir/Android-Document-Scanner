@@ -98,4 +98,8 @@ dependencies {
 
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
+    // Debug-only on-device diagnostic logger (never linked into release).
+    debugImplementation(libs.androidx.startup)
+    debugImplementation(libs.androidx.fragment)
 }
