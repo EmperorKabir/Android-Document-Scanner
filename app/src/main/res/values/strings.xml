@@ -21,6 +21,7 @@
     <string name="action_capture">Capture</string>
     <string name="action_done">Done</string>
     <string name="action_more">More</string>
+    <string name="action_grid">Grid</string>
     <string name="mode_single">Single</string>
     <string name="mode_batch">Batch</string>
     <string name="batch_done">Done · %1$d</string>
