@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -127,7 +128,7 @@ fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> 
         }
 
         Row(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier.fillMaxWidth().safeDrawingPadding().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             TextButton(onClick = onCancel) {

@@ -7,23 +7,19 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
 import com.kabirbhasin.docscanner.model.FilterType
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 /**
- * Document image pipeline built entirely on the Android graphics framework: page detection,
- * perspective correction and enhancement filters. No native dependencies.
+ * Document image pipeline built entirely on the Android graphics framework: page detection
+ * (still and live), perspective correction and enhancement. No native dependencies.
  */
 object ImagePipeline {
 
     private const val DETECT_EDGE = 480
 
-    /**
-     * Locate the page as the largest contrasting region (Otsu segmentation + connected
-     * components), then take its four extreme corners — which recovers a rotated/skewed
-     * quad. Falls back to a small inset when no clear page is found; the user can always
-     * fine-tune the corners afterwards.
-     */
+    /** Detect the page in a still bitmap; falls back to a small inset when nothing is found. */
     fun detectPage(bitmap: Bitmap): Quad {
         val scale = DETECT_EDGE.toFloat() / maxOf(bitmap.width, bitmap.height)
         val w = (bitmap.width * scale).roundToInt().coerceAtLeast(2)
@@ -31,20 +27,16 @@ object ImagePipeline {
         val small = Bitmap.createScaledBitmap(bitmap, w, h, true)
         val pixels = IntArray(w * h)
         small.getPixels(pixels, 0, w, 0, 0, w, h)
-
         val gray = IntArray(w * h)
         for (i in pixels.indices) {
             val c = pixels[i]
-            gray[i] = (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)).toInt()
+            gray[i] = luma(c)
         }
-
-        val threshold = otsu(gray)
-        val best = listOf(true, false)
-            .mapNotNull { bright -> largestRegionQuad(gray, w, h, threshold, bright) }
-            .maxByOrNull { it.areaFraction }
-
-        return if (best != null && best.areaFraction >= 0.18f) best.quad else insetQuad()
+        return detectQuad(gray, w, h)?.quad ?: insetQuad()
     }
+
+    /** Detect the page from a pre-extracted luminance buffer (live camera frames). Null if none. */
+    fun detectFromLuma(gray: IntArray, w: Int, h: Int): Quad? = detectQuad(gray, w, h)?.quad
 
     /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
@@ -64,7 +56,6 @@ object ImagePipeline {
             outW.toFloat(), outH.toFloat(),
             0f, outH.toFloat(),
         )
-
         val matrix = Matrix().apply { setPolyToPoly(src, 0, dst, 0, 4) }
         val output = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         Canvas(output).drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
@@ -74,7 +65,7 @@ object ImagePipeline {
     fun applyFilter(bitmap: Bitmap, filter: FilterType): Bitmap = when (filter) {
         FilterType.ORIGINAL -> bitmap
         FilterType.GREYSCALE -> withColorMatrix(bitmap, ColorMatrix().apply { setSaturation(0f) })
-        FilterType.MAGIC -> withColorMatrix(bitmap, magicMatrix())
+        FilterType.MAGIC -> magicScan(bitmap)
         FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
     }
 
@@ -82,9 +73,19 @@ object ImagePipeline {
 
     private class Detection(val quad: Quad, val areaFraction: Float)
 
+    private fun detectQuad(gray: IntArray, w: Int, h: Int): Detection? {
+        val t = otsu(gray)
+        return listOf(true, false)
+            .mapNotNull { bright -> largestRegionQuad(gray, w, h, t, bright) }
+            .maxByOrNull { it.areaFraction }
+            ?.takeIf { it.areaFraction >= 0.18f }
+    }
+
     /**
-     * Label connected foreground pixels for the chosen polarity and return the largest
-     * region of plausible page size, described by its four extreme corners.
+     * Label connected foreground pixels for the chosen polarity and return the largest region of
+     * plausible page size and high solidity, described by its four extreme corners. Solidity
+     * rejects the hollow background frame (whose extreme corners are the image corners) in favour
+     * of the solid, convex page region.
      */
     private fun largestRegionQuad(gray: IntArray, w: Int, h: Int, t: Int, bright: Boolean): Detection? {
         val n = w * h
@@ -95,20 +96,20 @@ object ImagePipeline {
         var bestArea = 0
         var bestCorners: IntArray? = null
 
-        for (start in 0 until n) {
-            if (!fg[start] || visited[start]) continue
+        for (origin in 0 until n) {
+            if (!fg[origin] || visited[origin]) continue
             var sp = 0
-            stack[sp++] = start
-            visited[start] = true
+            stack[sp++] = origin
+            visited[origin] = true
             var area = 0
             var minSum = Int.MAX_VALUE
             var maxSum = Int.MIN_VALUE
             var minDiff = Int.MAX_VALUE
             var maxDiff = Int.MIN_VALUE
-            var tl = start
-            var br = start
-            var tr = start
-            var bl = start
+            var tl = origin
+            var br = origin
+            var tr = origin
+            var bl = origin
             while (sp > 0) {
                 val p = stack[--sp]
                 val x = p % w
@@ -127,8 +128,6 @@ object ImagePipeline {
             }
             val frac = area.toFloat() / n
             if (frac in 0.18f..0.95f && area > bestArea) {
-                // Solidity rejects the hollow background frame (whose extreme corners are the
-                // image corners) in favour of the solid, convex page region.
                 val quadArea = quadAreaPx(tl, tr, br, bl, w)
                 if (quadArea > 0f && area / quadArea >= 0.75f) {
                     bestArea = area
@@ -140,6 +139,17 @@ object ImagePipeline {
         val corners = bestCorners ?: return null
         val quad = Quad.of(corners.map { Corner((it % w) / w.toFloat(), (it / w) / h.toFloat()) })
         return Detection(quad, bestArea.toFloat() / n)
+    }
+
+    private fun quadAreaPx(tl: Int, tr: Int, br: Int, bl: Int, w: Int): Float {
+        val xs = floatArrayOf((tl % w).toFloat(), (tr % w).toFloat(), (br % w).toFloat(), (bl % w).toFloat())
+        val ys = floatArrayOf((tl / w).toFloat(), (tr / w).toFloat(), (br / w).toFloat(), (bl / w).toFloat())
+        var a = 0f
+        for (i in 0 until 4) {
+            val j = (i + 1) % 4
+            a += xs[i] * ys[j] - xs[j] * ys[i]
+        }
+        return abs(a) / 2f
     }
 
     private fun otsu(gray: IntArray): Int {
@@ -169,17 +179,6 @@ object ImagePipeline {
         return threshold
     }
 
-    private fun quadAreaPx(tl: Int, tr: Int, br: Int, bl: Int, w: Int): Float {
-        val xs = floatArrayOf((tl % w).toFloat(), (tr % w).toFloat(), (br % w).toFloat(), (bl % w).toFloat())
-        val ys = floatArrayOf((tl / w).toFloat(), (tr / w).toFloat(), (br / w).toFloat(), (bl / w).toFloat())
-        var a = 0f
-        for (i in 0 until 4) {
-            val j = (i + 1) % 4
-            a += xs[i] * ys[j] - xs[j] * ys[i]
-        }
-        return kotlin.math.abs(a) / 2f
-    }
-
     private fun insetQuad(): Quad {
         val m = 0.06f
         return Quad(Corner(m, m), Corner(1f - m, m), Corner(1f - m, 1f - m), Corner(m, 1f - m))
@@ -194,19 +193,42 @@ object ImagePipeline {
         return out
     }
 
-    private fun magicMatrix(): ColorMatrix {
-        val contrast = 1.35f
-        val translate = (-0.5f * contrast + 0.5f) * 255f + 12f
-        val matrix = ColorMatrix(
-            floatArrayOf(
-                contrast, 0f, 0f, 0f, translate,
-                0f, contrast, 0f, 0f, translate,
-                0f, 0f, contrast, 0f, translate,
-                0f, 0f, 0f, 1f, 0f,
-            ),
-        )
-        matrix.postConcat(ColorMatrix().apply { setSaturation(1.18f) })
-        return matrix
+    /**
+     * Flatbed-clean colour scan: estimate the page illumination as a heavily downscaled background,
+     * then divide each pixel by it. This whitens the paper, removes shadows and uneven lighting, and
+     * preserves ink — the look of a sheet scanned on a flatbed.
+     */
+    private fun magicScan(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val sw = (w / 10).coerceAtLeast(1)
+        val sh = (h / 10).coerceAtLeast(1)
+        val small = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val bg = IntArray(sw * sh)
+        small.getPixels(bg, 0, sw, 0, 0, sw, sh)
+
+        val px = IntArray(w * h)
+        src.getPixels(px, 0, w, 0, 0, w, h)
+        val out = IntArray(w * h)
+        val gain = 255f * 0.97f
+        for (y in 0 until h) {
+            val sy = (y * sh / h).coerceIn(0, sh - 1)
+            for (x in 0 until w) {
+                val sx = (x * sw / w).coerceIn(0, sw - 1)
+                val b = bg[sy * sw + sx]
+                val p = px[y * w + x]
+                val br = ((b shr 16) and 0xFF).coerceAtLeast(1)
+                val bgC = ((b shr 8) and 0xFF).coerceAtLeast(1)
+                val bb = (b and 0xFF).coerceAtLeast(1)
+                val r = (((p shr 16) and 0xFF) * gain / br).toInt().coerceIn(0, 255)
+                val g = (((p shr 8) and 0xFF) * gain / bgC).toInt().coerceIn(0, 255)
+                val bl = ((p and 0xFF) * gain / bb).toInt().coerceIn(0, 255)
+                out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
+            }
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(out, 0, w, 0, 0, w, h)
+        return result
     }
 
     /** Local adaptive threshold using an integral image, producing a clean bi-level scan. */
@@ -218,8 +240,7 @@ object ImagePipeline {
 
         val gray = IntArray(w * h)
         for (i in pixels.indices) {
-            val c = pixels[i]
-            gray[i] = (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)).toInt()
+            gray[i] = luma(pixels[i])
         }
 
         val stride = w + 1
@@ -256,6 +277,9 @@ object ImagePipeline {
         result.setPixels(out, 0, w, 0, 0, w, h)
         return result
     }
+
+    private fun luma(c: Int): Int =
+        (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)).toInt()
 
     private fun dist(p: FloatArray, a: Int, b: Int): Float = hypot(p[a] - p[b], p[a + 1] - p[b + 1])
 }
