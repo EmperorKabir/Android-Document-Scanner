@@ -70,6 +70,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun importPdf(uri: Uri) {
+        viewModelScope.launch {
+            val bitmaps = com.kabirbhasin.docscanner.export.PdfImporter.render(getApplication(), uri)
+            if (bitmaps.isEmpty()) return@launch
+            val docId = store.newDocumentId()
+            val now = System.currentTimeMillis()
+            val pages = bitmaps.map { bitmap ->
+                val pageId = store.newPageId()
+                store.savePageImage(docId, pageId, bitmap)
+                PageMeta(pageId, FilterType.ORIGINAL)
+            }
+            store.upsert(DocumentMeta(docId, defaultTitle(now), now, now, pages))
+            screen = Screen.Review(docId)
+        }
+    }
+
     fun importImage(uri: Uri) {
         viewModelScope.launch {
             val pageId = store.newPageId()

@@ -3,6 +3,8 @@
     <string name="home_title">Documents</string>
     <string name="action_scan">Scan</string>
     <string name="action_import">Import</string>
+    <string name="import_images">Import images</string>
+    <string name="import_pdf">Import PDF</string>
     <string name="action_add_page">Add page</string>
     <string name="action_delete">Delete</string>
     <string name="action_rename">Rename</string>

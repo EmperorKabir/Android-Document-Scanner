@@ -61,12 +61,17 @@ fun HomeScreen(
     store: DocumentStore,
     onScan: () -> Unit,
     onImport: (Uri) -> Unit,
+    onImportPdf: (Uri) -> Unit,
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri -> if (uri != null) onImport(uri) }
+    val pdfPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> if (uri != null) onImportPdf(uri) }
+    var importMenu by remember { mutableStateOf(false) }
 
     val columns = when (windowSizeClass.widthSizeClass) {
         WindowWidthSizeClass.Compact -> 2
@@ -79,12 +84,28 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.home_title)) },
                 actions = {
-                    IconButton(onClick = {
-                        picker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    }) {
-                        Icon(painterResource(R.drawable.ic_import), stringResource(R.string.action_import))
+                    Box {
+                        IconButton(onClick = { importMenu = true }) {
+                            Icon(painterResource(R.drawable.ic_import), stringResource(R.string.action_import))
+                        }
+                        DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.import_images)) },
+                                onClick = {
+                                    importMenu = false
+                                    picker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                    )
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.import_pdf)) },
+                                onClick = {
+                                    importMenu = false
+                                    pdfPicker.launch("application/pdf")
+                                },
+                            )
+                        }
                     }
                 },
             )

@@ -37,6 +37,7 @@ fun DocScannerApp(
             store = viewModel.store,
             onScan = viewModel::startNewScan,
             onImport = viewModel::importImage,
+            onImportPdf = viewModel::importPdf,
             onOpen = viewModel::openDocument,
             onDelete = viewModel::deleteDocument,
         )
