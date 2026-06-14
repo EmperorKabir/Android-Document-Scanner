@@ -2,7 +2,6 @@ package com.kabirbhasin.docscanner.ui
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,7 +60,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addBatchPage(documentId: String, captured: File) {
         viewModelScope.launch {
-            val raw = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(captured.absolutePath) }
+            val raw = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(captured.absolutePath) }
             withContext(Dispatchers.IO) { captured.delete() }
             if (raw == null) return@launch
             val pageId = store.newPageId()
@@ -109,7 +108,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onCropConfirmed(documentId: String, pageId: String, rawPath: String, quad: Quad) {
         viewModelScope.launch {
-            val raw = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(rawPath) }
+            val raw = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(rawPath) }
             if (raw == null) {
                 goReviewOrHome(documentId)
                 return@launch

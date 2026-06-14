@@ -1,11 +1,13 @@
 package com.kabirbhasin.docscanner.cv
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.media.ExifInterface
 import com.kabirbhasin.docscanner.model.FilterType
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -37,6 +39,28 @@ object ImagePipeline {
 
     /** Detect the page from a pre-extracted luminance buffer (live camera frames). Null if none. */
     fun detectFromLuma(gray: IntArray, w: Int, h: Int): Quad? = detectQuad(gray, w, h)?.quad
+
+    /** Decode a JPEG and apply its EXIF orientation so the bitmap is upright. */
+    fun decodeOriented(path: String): Bitmap? {
+        val bitmap = BitmapFactory.decodeFile(path) ?: return null
+        val orientation = try {
+            ExifInterface(path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } catch (e: Exception) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.preScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.preScale(-1f, 1f) }
+            else -> return bitmap
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
 
     /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
@@ -315,34 +339,82 @@ object ImagePipeline {
     private fun magicScan(src: Bitmap, blackPoint: Float): Bitmap {
         val w = src.width
         val h = src.height
-        val sw = (w / 10).coerceAtLeast(1)
-        val sh = (h / 10).coerceAtLeast(1)
-        val small = Bitmap.createScaledBitmap(src, sw, sh, true)
-        val bg = IntArray(sw * sh)
-        small.getPixels(bg, 0, sw, 0, 0, sw, sh)
-
         val px = IntArray(w * h)
         src.getPixels(px, 0, w, 0, 0, w, h)
+
+        // Estimate the paper colour per cell as the brightest pixel (max-pool): this ignores ink,
+        // so dividing by it whitens the page and follows shadows without washing the writing out.
+        val cell = (maxOf(w, h) / 36).coerceIn(12, 64)
+        val bw = (w + cell - 1) / cell
+        val bh = (h + cell - 1) / cell
+        val bgR = IntArray(bw * bh)
+        val bgG = IntArray(bw * bh)
+        val bgB = IntArray(bw * bh)
+        for (cy in 0 until bh) {
+            val y0 = cy * cell
+            val y1 = minOf(y0 + cell, h)
+            for (cx in 0 until bw) {
+                val x0 = cx * cell
+                val x1 = minOf(x0 + cell, w)
+                var bestLum = -1
+                var best = 0xFFFFFF
+                for (y in y0 until y1) {
+                    val row = y * w
+                    for (x in x0 until x1) {
+                        val p = px[row + x]
+                        val lum = ((p shr 16) and 0xFF) + ((p shr 8) and 0xFF) + (p and 0xFF)
+                        if (lum > bestLum) {
+                            bestLum = lum
+                            best = p
+                        }
+                    }
+                }
+                bgR[cy * bw + cx] = (best shr 16) and 0xFF
+                bgG[cy * bw + cx] = (best shr 8) and 0xFF
+                bgB[cy * bw + cx] = best and 0xFF
+            }
+        }
+        val sR = boxBlur(bgR, bw, bh, 1)
+        val sG = boxBlur(bgG, bw, bh, 1)
+        val sB = boxBlur(bgB, bw, bh, 1)
+
         val out = IntArray(w * h)
         val range = (1f - blackPoint).coerceAtLeast(0.01f)
         for (y in 0 until h) {
-            val sy = (y * sh / h).coerceIn(0, sh - 1)
+            val fy = y.toFloat() / cell
             for (x in 0 until w) {
-                val sx = (x * sw / w).coerceIn(0, sw - 1)
-                val b = bg[sy * sw + sx]
+                val fx = x.toFloat() / cell
+                val br = sampleGrid(sR, bw, bh, fx, fy).coerceAtLeast(1f)
+                val bgc = sampleGrid(sG, bw, bh, fx, fy).coerceAtLeast(1f)
+                val bb = sampleGrid(sB, bw, bh, fx, fy).coerceAtLeast(1f)
                 val p = px[y * w + x]
-                val br = ((b shr 16) and 0xFF).coerceAtLeast(1)
-                val bgC = ((b shr 8) and 0xFF).coerceAtLeast(1)
-                val bb = (b and 0xFF).coerceAtLeast(1)
-                val r = stretch(((p shr 16) and 0xFF).toFloat() / br, blackPoint, range)
-                val g = stretch(((p shr 8) and 0xFF).toFloat() / bgC, blackPoint, range)
-                val bl = stretch((p and 0xFF).toFloat() / bb, blackPoint, range)
+                val r = stretch(((p shr 16) and 0xFF) / br, blackPoint, range)
+                val g = stretch(((p shr 8) and 0xFF) / bgc, blackPoint, range)
+                val bl = stretch((p and 0xFF) / bb, blackPoint, range)
                 out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
             }
         }
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         result.setPixels(out, 0, w, 0, 0, w, h)
         return result
+    }
+
+    private fun sampleGrid(grid: IntArray, gw: Int, gh: Int, fx: Float, fy: Float): Float {
+        val x = (fx - 0.5f).coerceIn(0f, (gw - 1).toFloat())
+        val y = (fy - 0.5f).coerceIn(0f, (gh - 1).toFloat())
+        val x0 = x.toInt()
+        val y0 = y.toInt()
+        val x1 = minOf(x0 + 1, gw - 1)
+        val y1 = minOf(y0 + 1, gh - 1)
+        val tx = x - x0
+        val ty = y - y0
+        val a = grid[y0 * gw + x0].toFloat()
+        val b = grid[y0 * gw + x1].toFloat()
+        val c = grid[y1 * gw + x0].toFloat()
+        val d = grid[y1 * gw + x1].toFloat()
+        val top = a + (b - a) * tx
+        val bottom = c + (d - c) * tx
+        return top + (bottom - top) * ty
     }
 
     /**

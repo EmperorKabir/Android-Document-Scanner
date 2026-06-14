@@ -1,7 +1,6 @@
 package com.kabirbhasin.docscanner.ui.crop
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -46,7 +45,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> Unit) {
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = rawImagePath) {
-        value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(rawImagePath) }
+        value = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(rawImagePath) }
     }
     var corners by remember { mutableStateOf<List<Offset>?>(null) }
     val density = LocalDensity.current
