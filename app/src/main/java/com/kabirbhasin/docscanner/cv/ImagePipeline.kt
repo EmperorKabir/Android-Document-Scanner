@@ -125,6 +125,39 @@ object ImagePipeline {
         return Bitmap.createBitmap(src, fl, ft, fr - fl, fb - ft)
     }
 
+    /**
+     * Refine an already-captured scan: re-detect the page on the (now clean) output and warp it
+     * flat, removing residual skew and any wedge of background the capture left in a corner — which
+     * straight-edge trimming cannot fix. Page-vs-surround contrast is high here (bright page on a
+     * darker surround), so detection that fails on the raw cluttered photo succeeds on this output.
+     * Returns the source unchanged unless a confident, meaningfully-different page boundary is found.
+     */
+    fun refineScan(src: Bitmap): Bitmap {
+        val maxDim = maxOf(src.width, src.height)
+        if (maxDim < 80) return src
+        val scale = (DETECT_EDGE.toFloat() / maxDim).coerceAtMost(1f)
+        val w = (src.width * scale).roundToInt().coerceAtLeast(2)
+        val h = (src.height * scale).roundToInt().coerceAtLeast(2)
+        val small = Bitmap.createScaledBitmap(src, w, h, true)
+        val pixels = IntArray(w * h)
+        small.getPixels(pixels, 0, w, 0, 0, w, h)
+        val gray = IntArray(w * h) { luma(pixels[it]) }
+        val blurred = boxBlur(gray, w, h, (maxOf(w, h) / 200).coerceIn(1, 4))
+        val t = otsu(blurred)
+        val quad = brightPageQuad(BooleanArray(w * h) { blurred[it] > t }, w, h) ?: return src
+
+        // Only warp when the page boundary is a large, plausible region that is meaningfully inset or
+        // skewed; otherwise the capture was already tight and a resample would only soften it.
+        val area = polyArea(quad)
+        if (area < 0.45f || area > 0.998f) return src
+        val maxDisp = maxOf(
+            corDisp(quad.tl, 0f, 0f), corDisp(quad.tr, 1f, 0f),
+            corDisp(quad.br, 1f, 1f), corDisp(quad.bl, 0f, 1f),
+        )
+        if (maxDisp < 0.012f) return src
+        return warp(src, quad)
+    }
+
     /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
         val w = bitmap.width.toFloat()
@@ -341,6 +374,65 @@ object ImagePipeline {
         val quad = Quad.of(corners.map { Corner((it % w) / w.toFloat(), (it / w) / h.toFloat()) })
         return Detection(quad, bestArea.toFloat() / n)
     }
+
+    /**
+     * Largest connected bright region described by its four extreme corners. Unlike
+     * [largestMaskQuad] this applies no solidity gate (a text-filled page has many interior dark
+     * holes that lower solidity but do not move the outer extremes) and no upper size cap (a page
+     * may fill nearly the whole frame). Used to re-find the page on an already-captured scan.
+     */
+    private fun brightPageQuad(fg: BooleanArray, w: Int, h: Int): Quad? {
+        val n = w * h
+        val visited = BooleanArray(n)
+        val stack = IntArray(n)
+        var bestArea = 0
+        var best: IntArray? = null
+        for (origin in 0 until n) {
+            if (!fg[origin] || visited[origin]) continue
+            var sp = 0
+            stack[sp++] = origin
+            visited[origin] = true
+            var area = 0
+            var minSum = Int.MAX_VALUE; var maxSum = Int.MIN_VALUE
+            var minDiff = Int.MAX_VALUE; var maxDiff = Int.MIN_VALUE
+            var tl = origin; var br = origin; var tr = origin; var bl = origin
+            while (sp > 0) {
+                val p = stack[--sp]
+                val x = p % w; val y = p / w
+                area++
+                val sum = x + y; val diff = x - y
+                if (sum < minSum) { minSum = sum; tl = p }
+                if (sum > maxSum) { maxSum = sum; br = p }
+                if (diff > maxDiff) { maxDiff = diff; tr = p }
+                if (diff < minDiff) { minDiff = diff; bl = p }
+                if (x > 0) { val q = p - 1; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (x < w - 1) { val q = p + 1; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (y > 0) { val q = p - w; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+                if (y < h - 1) { val q = p + w; if (fg[q] && !visited[q]) { visited[q] = true; stack[sp++] = q } }
+            }
+            if (area > bestArea) {
+                bestArea = area
+                best = intArrayOf(tl, tr, br, bl)
+            }
+        }
+        val c = best ?: return null
+        return Quad(
+            Corner((c[0] % w) / w.toFloat(), (c[0] / w) / h.toFloat()),
+            Corner((c[1] % w) / w.toFloat(), (c[1] / w) / h.toFloat()),
+            Corner((c[2] % w) / w.toFloat(), (c[2] / w) / h.toFloat()),
+            Corner((c[3] % w) / w.toFloat(), (c[3] / w) / h.toFloat()),
+        )
+    }
+
+    private fun polyArea(q: Quad): Float {
+        val xs = floatArrayOf(q.tl.x, q.tr.x, q.br.x, q.bl.x)
+        val ys = floatArrayOf(q.tl.y, q.tr.y, q.br.y, q.bl.y)
+        var a = 0f
+        for (i in 0 until 4) { val j = (i + 1) % 4; a += xs[i] * ys[j] - xs[j] * ys[i] }
+        return abs(a) / 2f
+    }
+
+    private fun corDisp(c: Corner, x: Float, y: Float): Float = hypot(c.x - x, c.y - y)
 
     private fun quadAreaPx(tl: Int, tr: Int, br: Int, bl: Int, w: Int): Float {
         val xs = floatArrayOf((tl % w).toFloat(), (tr % w).toFloat(), (br % w).toFloat(), (bl % w).toFloat())
