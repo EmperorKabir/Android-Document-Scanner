@@ -7,8 +7,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.getValue
+import com.kabirbhasin.docscanner.ui.DocScannerApp
 import com.kabirbhasin.docscanner.ui.adaptive.rememberDevicePosture
-import com.kabirbhasin.docscanner.ui.home.HomeScreen
 import com.kabirbhasin.docscanner.ui.theme.DocumentScannerTheme
 
 class MainActivity : ComponentActivity() {
@@ -21,10 +21,7 @@ class MainActivity : ComponentActivity() {
             DocumentScannerTheme {
                 val windowSizeClass = calculateWindowSizeClass(this)
                 val posture by rememberDevicePosture()
-                HomeScreen(
-                    windowSizeClass = windowSizeClass,
-                    devicePosture = posture,
-                )
+                DocScannerApp(windowSizeClass = windowSizeClass, devicePosture = posture)
             }
         }
     }
