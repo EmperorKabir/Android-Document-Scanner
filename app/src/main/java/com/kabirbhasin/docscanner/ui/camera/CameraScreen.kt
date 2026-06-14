@@ -64,11 +64,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.abs
 
 private data class DetectedFrame(val quad: Quad, val srcW: Int, val srcH: Int)
 
-private const val AUTO_CAPTURE_FRAMES = 11
 private const val BATCH_COOLDOWN_MS = 900L
 
 @Composable
@@ -122,13 +120,6 @@ fun CameraScreen(
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val capturing = remember { AtomicBoolean(false) }
     var detection by remember { mutableStateOf<DetectedFrame?>(null) }
-    val stability = remember { Stability() }
-    val armed = remember { AtomicBoolean(false) }
-    LaunchedEffect(Unit) {
-        delay(2200)
-        armed.set(true)
-    }
-
     val capture = rememberUpdatedState { batch: Boolean ->
         if (capturing.compareAndSet(false, true)) {
             val file = File(context.cacheDir, "cap_${System.nanoTime()}.jpg")
@@ -140,8 +131,6 @@ fun CameraScreen(
                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                         onCaptured(file, batch)
                         if (batch) {
-                            stability.count = 0
-                            stability.last = null
                             scope.launch {
                                 delay(BATCH_COOLDOWN_MS)
                                 capturing.set(false)
@@ -159,19 +148,6 @@ fun CameraScreen(
 
     val onFrame = rememberUpdatedState<(DetectedFrame?) -> Unit> { frame ->
         detection = frame
-        val quad = frame?.quad
-        if (quad == null) {
-            stability.last = null
-            stability.count = 0
-        } else {
-            val prev = stability.last
-            stability.count = if (prev != null && quadDelta(prev, quad) < 0.025f) stability.count + 1 else 1
-            stability.last = quad
-            if (armed.get() && stability.count >= AUTO_CAPTURE_FRAMES && !capturing.get()) {
-                stability.count = 0
-                capture.value.invoke(batchMode)
-            }
-        }
     }
     val analyzer = remember {
         ImageAnalysis.Analyzer { image ->
@@ -307,11 +283,6 @@ fun CameraScreen(
     }
 }
 
-private class Stability {
-    var last: Quad? = null
-    var count: Int = 0
-}
-
 @Composable
 private fun QuadOverlay(detection: DetectedFrame?, modifier: Modifier) {
     Canvas(modifier) {
@@ -335,14 +306,6 @@ private fun QuadOverlay(detection: DetectedFrame?, modifier: Modifier) {
         }
         pts.forEach { drawCircle(Color(0xFF00E5A0), radius = 14f, center = it) }
     }
-}
-
-private fun quadDelta(a: Quad, b: Quad): Float {
-    val pa = a.toList()
-    val pb = b.toList()
-    var sum = 0f
-    for (i in 0 until 4) sum += abs(pa[i].x - pb[i].x) + abs(pa[i].y - pb[i].y)
-    return sum / 8f
 }
 
 private fun analyseFrame(image: ImageProxy): DetectedFrame? {

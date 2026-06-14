@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -48,6 +49,7 @@ fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> 
         value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(rawImagePath) }
     }
     var corners by remember { mutableStateOf<List<Offset>?>(null) }
+    val density = LocalDensity.current
 
     LaunchedEffect(bitmap) {
         val bmp = bitmap ?: return@LaunchedEffect
@@ -67,15 +69,18 @@ fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> 
             } else {
                 val cw = constraints.maxWidth.toFloat()
                 val ch = constraints.maxHeight.toFloat()
+                val margin = with(density) { 40.dp.toPx() }
+                val availW = (cw - 2 * margin).coerceAtLeast(1f)
+                val availH = (ch - 2 * margin).coerceAtLeast(1f)
                 val ratio = bmp.width.toFloat() / bmp.height.toFloat()
                 val dw: Float
                 val dh: Float
-                if (cw / ch > ratio) {
-                    dh = ch
-                    dw = ch * ratio
+                if (availW / availH > ratio) {
+                    dh = availH
+                    dw = availH * ratio
                 } else {
-                    dw = cw
-                    dh = cw / ratio
+                    dw = availW
+                    dh = availW / ratio
                 }
                 val ox = (cw - dw) / 2f
                 val oy = (ch - dh) / 2f
