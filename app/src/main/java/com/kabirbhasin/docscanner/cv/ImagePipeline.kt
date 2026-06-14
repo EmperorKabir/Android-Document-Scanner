@@ -69,6 +69,62 @@ object ImagePipeline {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
+    /**
+     * Trim dark borders (e.g. a sliver of desk left by an imperfect auto-crop). Conservative:
+     * only removes edge rows/columns markedly darker than the page, capped at 20% per side.
+     */
+    fun autoTrim(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val scale = 400f / maxOf(w, h)
+        val sw = (w * scale).toInt().coerceAtLeast(1)
+        val sh = (h * scale).toInt().coerceAtLeast(1)
+        val small = Bitmap.createScaledBitmap(src, sw, sh, true)
+        val px = IntArray(sw * sh)
+        small.getPixels(px, 0, sw, 0, 0, sw, sh)
+
+        val rowMean = FloatArray(sh)
+        val colMean = FloatArray(sw)
+        for (y in 0 until sh) {
+            var s = 0
+            for (x in 0 until sw) {
+                val p = px[y * sw + x]
+                s += ((p shr 16) and 0xFF) + ((p shr 8) and 0xFF) + (p and 0xFF)
+            }
+            rowMean[y] = s.toFloat() / (sw * 3)
+        }
+        for (x in 0 until sw) {
+            var s = 0
+            for (y in 0 until sh) {
+                val p = px[y * sw + x]
+                s += ((p shr 16) and 0xFF) + ((p shr 8) and 0xFF) + (p and 0xFF)
+            }
+            colMean[x] = s.toFloat() / (sh * 3)
+        }
+
+        val median = rowMean.sorted()[sh / 2]
+        val threshold = median * 0.7f
+        val maxY = (sh * 0.2f).toInt()
+        val maxX = (sw * 0.2f).toInt()
+        var top = 0
+        while (top < maxY && rowMean[top] < threshold) top++
+        var bottom = sh - 1
+        var bt = 0
+        while (bt < maxY && rowMean[bottom] < threshold) { bottom--; bt++ }
+        var left = 0
+        while (left < maxX && colMean[left] < threshold) left++
+        var right = sw - 1
+        var rt = 0
+        while (rt < maxX && colMean[right] < threshold) { right--; rt++ }
+
+        if (top == 0 && left == 0 && bottom == sh - 1 && right == sw - 1) return src
+        val fl = (left / scale).toInt().coerceIn(0, w - 1)
+        val ft = (top / scale).toInt().coerceIn(0, h - 1)
+        val fr = ((right + 1) / scale).toInt().coerceIn(fl + 1, w)
+        val fb = ((bottom + 1) / scale).toInt().coerceIn(ft + 1, h)
+        return Bitmap.createBitmap(src, fl, ft, fr - fl, fb - ft)
+    }
+
     /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
         val w = bitmap.width.toFloat()

@@ -115,7 +115,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val bitmap = getApplication<Application>().contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it)
             } ?: return@withContext false
-            store.savePageImage(documentId, pageId, bitmap)
+            store.savePageImage(documentId, pageId, ImagePipeline.autoTrim(bitmap))
             true
         }
 
