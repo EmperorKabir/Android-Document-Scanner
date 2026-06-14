@@ -106,12 +106,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun onCropConfirmed(documentId: String, pageId: String, rawPath: String, quad: Quad) {
+    fun onCropConfirmed(documentId: String, pageId: String, rawPath: String, quad: Quad, rotation: Int) {
         viewModelScope.launch {
-            val raw = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(rawPath) }
-            if (raw == null) {
+            val decoded = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(rawPath) }
+            if (decoded == null) {
                 goReviewOrHome(documentId)
                 return@launch
+            }
+            val raw = if (rotation != 0) {
+                withContext(Dispatchers.Default) { ImagePipeline.rotate(decoded, rotation) }
+            } else {
+                decoded
             }
             val warped = withContext(Dispatchers.Default) { ImagePipeline.warp(raw, quad) }
             store.savePageImage(documentId, pageId, warped)

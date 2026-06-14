@@ -62,6 +62,13 @@ object ImagePipeline {
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
+    /** Rotate a bitmap clockwise by [degrees] (a multiple of 90). */
+    fun rotate(bitmap: Bitmap, degrees: Int): Bitmap {
+        if (degrees % 360 == 0) return bitmap
+        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
     /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
         val w = bitmap.width.toFloat()
@@ -384,18 +391,26 @@ object ImagePipeline {
             val fy = y.toFloat() / cell
             for (x in 0 until w) {
                 val fx = x.toFloat() / cell
-                val br = sampleGrid(sR, bw, bh, fx, fy).coerceAtLeast(1f)
-                val bgc = sampleGrid(sG, bw, bh, fx, fy).coerceAtLeast(1f)
-                val bb = sampleGrid(sB, bw, bh, fx, fy).coerceAtLeast(1f)
+                val bgLum = ((sampleGrid(sR, bw, bh, fx, fy) +
+                    sampleGrid(sG, bw, bh, fx, fy) +
+                    sampleGrid(sB, bw, bh, fx, fy)) / 3f).coerceAtLeast(1f)
                 val p = px[y * w + x]
-                var r = stretch(((p shr 16) and 0xFF) / br, blackPoint, range)
-                var g = stretch(((p shr 8) and 0xFF) / bgc, blackPoint, range)
-                var bl = stretch((p and 0xFF) / bb, blackPoint, range)
-                // Snap near-white paper to pure white to remove faint lighting colour casts.
-                if (minOf(r, g, bl) >= 215) {
+                var r = stretch(((p shr 16) and 0xFF) / bgLum, blackPoint, range)
+                var g = stretch(((p shr 8) and 0xFF) / bgLum, blackPoint, range)
+                var bl = stretch((p and 0xFF) / bgLum, blackPoint, range)
+                val mn = minOf(r, g, bl)
+                if (mn >= 215) {
+                    // Near-white paper -> pure white.
                     r = 255
                     g = 255
                     bl = 255
+                } else if (mn >= 145) {
+                    // Light paper (possibly shadowed) -> desaturate toward grey to drop colour casts,
+                    // while darker ink keeps its colour.
+                    val lum = (0.299f * r + 0.587f * g + 0.114f * bl).toInt()
+                    r = (r * 0.25f + lum * 0.75f).toInt()
+                    g = (g * 0.25f + lum * 0.75f).toInt()
+                    bl = (bl * 0.25f + lum * 0.75f).toInt()
                 }
                 out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
             }

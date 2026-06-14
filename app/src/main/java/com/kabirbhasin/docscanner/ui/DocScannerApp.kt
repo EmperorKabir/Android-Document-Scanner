@@ -65,7 +65,9 @@ fun DocScannerApp(
 
         is Screen.Crop -> CropScreen(
             rawImagePath = s.rawPath,
-            onConfirm = { quad -> viewModel.onCropConfirmed(s.documentId, s.pageId, s.rawPath, quad) },
+            onConfirm = { quad, rotation ->
+                viewModel.onCropConfirmed(s.documentId, s.pageId, s.rawPath, quad, rotation)
+            },
             onCancel = { viewModel.cancelCrop(s.documentId, s.rawPath) },
         )
 

@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -31,6 +34,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -43,9 +47,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> Unit) {
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = rawImagePath) {
+fun CropScreen(rawImagePath: String, onConfirm: (Quad, Int) -> Unit, onCancel: () -> Unit) {
+    val loaded by produceState<Bitmap?>(initialValue = null, key1 = rawImagePath) {
         value = withContext(Dispatchers.IO) { ImagePipeline.decodeOriented(rawImagePath) }
+    }
+    var rotation by remember { mutableIntStateOf(0) }
+    val bitmap = remember(loaded, rotation) {
+        loaded?.let { if (rotation != 0) ImagePipeline.rotate(it, rotation) else it }
     }
     var corners by remember { mutableStateOf<List<Offset>?>(null) }
     val density = LocalDensity.current
@@ -134,12 +142,20 @@ fun CropScreen(rawImagePath: String, onConfirm: (Quad) -> Unit, onCancel: () -> 
         Row(
             Modifier.fillMaxWidth().safeDrawingPadding().padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onCancel) {
                 Text(stringResource(R.string.action_retake), color = Color.White)
             }
+            IconButton(onClick = { rotation = (rotation + 90) % 360 }) {
+                Icon(
+                    painterResource(R.drawable.ic_rotate),
+                    stringResource(R.string.action_rotate),
+                    tint = Color.White,
+                )
+            }
             Button(
-                onClick = { corners?.let { c -> onConfirm(Quad.of(c.map { Corner(it.x, it.y) })) } },
+                onClick = { corners?.let { c -> onConfirm(Quad.of(c.map { Corner(it.x, it.y) }), rotation) } },
                 enabled = corners != null,
             ) {
                 Text(stringResource(R.string.action_use))
