@@ -388,9 +388,15 @@ object ImagePipeline {
                 val bgc = sampleGrid(sG, bw, bh, fx, fy).coerceAtLeast(1f)
                 val bb = sampleGrid(sB, bw, bh, fx, fy).coerceAtLeast(1f)
                 val p = px[y * w + x]
-                val r = stretch(((p shr 16) and 0xFF) / br, blackPoint, range)
-                val g = stretch(((p shr 8) and 0xFF) / bgc, blackPoint, range)
-                val bl = stretch((p and 0xFF) / bb, blackPoint, range)
+                var r = stretch(((p shr 16) and 0xFF) / br, blackPoint, range)
+                var g = stretch(((p shr 8) and 0xFF) / bgc, blackPoint, range)
+                var bl = stretch((p and 0xFF) / bb, blackPoint, range)
+                // Snap near-white paper to pure white to remove faint lighting colour casts.
+                if (minOf(r, g, bl) >= 215) {
+                    r = 255
+                    g = 255
+                    bl = 255
+                }
                 out[y * w + x] = (0xFF shl 24) or (r shl 16) or (g shl 8) or bl
             }
         }

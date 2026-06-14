@@ -6,6 +6,9 @@
     <string name="import_images">Import images</string>
     <string name="import_pdf">Import PDF</string>
     <string name="action_merge">Merge into…</string>
+    <string name="action_select">Select</string>
+    <string name="action_select_all">Select all</string>
+    <string name="selected_count">%1$d selected</string>
     <string name="merge_dialog_title">Merge into</string>
     <string name="merge_none">No other documents</string>
     <string name="action_add_page">Add page</string>

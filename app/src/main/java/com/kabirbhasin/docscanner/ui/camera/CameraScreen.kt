@@ -2,6 +2,7 @@ package com.kabirbhasin.docscanner.ui.camera
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -59,8 +60,10 @@ import com.kabirbhasin.docscanner.R
 import com.kabirbhasin.docscanner.cv.ImagePipeline
 import com.kabirbhasin.docscanner.cv.Quad
 import com.kabirbhasin.docscanner.ui.rememberImageFile
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -122,16 +125,24 @@ fun CameraScreen(
     var detection by remember { mutableStateOf<DetectedFrame?>(null) }
     val capture = rememberUpdatedState { batch: Boolean ->
         if (capturing.compareAndSet(false, true)) {
-            val file = File(context.cacheDir, "cap_${System.nanoTime()}.jpg")
-            val options = ImageCapture.OutputFileOptions.Builder(file).build()
             imageCapture.takePicture(
-                options,
                 ContextCompat.getMainExecutor(context),
-                object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        onCaptured(file, batch)
-                        if (batch) {
-                            scope.launch {
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        val rotation = image.imageInfo.rotationDegrees
+                        val bitmap = image.toBitmap()
+                        image.close()
+                        scope.launch {
+                            val file = withContext(Dispatchers.IO) {
+                                val upright = rotateBitmap(bitmap, rotation)
+                                val target = File(context.cacheDir, "cap_${System.nanoTime()}.jpg")
+                                target.outputStream().use {
+                                    upright.compress(Bitmap.CompressFormat.JPEG, 95, it)
+                                }
+                                target
+                            }
+                            onCaptured(file, batch)
+                            if (batch) {
                                 delay(BATCH_COOLDOWN_MS)
                                 capturing.set(false)
                             }
@@ -306,6 +317,12 @@ private fun QuadOverlay(detection: DetectedFrame?, modifier: Modifier) {
         }
         pts.forEach { drawCircle(Color(0xFF00E5A0), radius = 14f, center = it) }
     }
+}
+
+private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
+    if (degrees == 0) return bitmap
+    val matrix = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
 private fun analyseFrame(image: ImageProxy): DetectedFrame? {

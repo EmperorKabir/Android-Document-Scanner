@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
@@ -36,6 +37,7 @@ import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -76,6 +78,8 @@ fun HomeScreen(
     ) { uri -> if (uri != null) onImportPdf(uri) }
     var importMenu by remember { mutableStateOf(false) }
     var mergeSource by remember { mutableStateOf<String?>(null) }
+    var selecting by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateListOf<String>() }
 
     val columns = when (windowSizeClass.widthSizeClass) {
         WindowWidthSizeClass.Compact -> 2
@@ -85,34 +89,71 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.home_title)) },
-                actions = {
-                    Box {
-                        IconButton(onClick = { importMenu = true }) {
-                            Icon(painterResource(R.drawable.ic_import), stringResource(R.string.action_import))
+            if (selecting) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.selected_count, selected.size)) },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            selecting = false
+                            selected.clear()
+                        }) {
+                            Icon(painterResource(R.drawable.ic_back), stringResource(R.string.action_cancel))
                         }
-                        DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.import_images)) },
-                                onClick = {
-                                    importMenu = false
-                                    picker.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                    )
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.import_pdf)) },
-                                onClick = {
-                                    importMenu = false
-                                    pdfPicker.launch("application/pdf")
-                                },
-                            )
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            if (selected.size == documents.size) {
+                                selected.clear()
+                            } else {
+                                selected.clear()
+                                selected.addAll(documents.map { it.id })
+                            }
+                        }) {
+                            Icon(painterResource(R.drawable.ic_check), stringResource(R.string.action_select_all))
                         }
-                    }
-                },
-            )
+                        IconButton(
+                            onClick = {
+                                val ids = selected.toList()
+                                selecting = false
+                                selected.clear()
+                                ids.forEach { onDelete(it) }
+                            },
+                            enabled = selected.isNotEmpty(),
+                        ) {
+                            Icon(painterResource(R.drawable.ic_delete), stringResource(R.string.action_delete))
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.home_title)) },
+                    actions = {
+                        Box {
+                            IconButton(onClick = { importMenu = true }) {
+                                Icon(painterResource(R.drawable.ic_import), stringResource(R.string.action_import))
+                            }
+                            DropdownMenu(expanded = importMenu, onDismissRequest = { importMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.import_images)) },
+                                    onClick = {
+                                        importMenu = false
+                                        picker.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                        )
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.import_pdf)) },
+                                    onClick = {
+                                        importMenu = false
+                                        pdfPicker.launch("application/pdf")
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+            }
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -148,9 +189,18 @@ fun HomeScreen(
                     DocumentCard(
                         doc = doc,
                         store = store,
+                        selecting = selecting,
+                        isSelected = selected.contains(doc.id),
                         onOpen = onOpen,
                         onDelete = onDelete,
                         onMergeRequest = { mergeSource = it },
+                        onToggleSelect = {
+                            if (selected.contains(doc.id)) selected.remove(doc.id) else selected.add(doc.id)
+                        },
+                        onEnterSelect = {
+                            selecting = true
+                            if (!selected.contains(doc.id)) selected.add(doc.id)
+                        },
                     )
                 }
             }
@@ -191,19 +241,24 @@ fun HomeScreen(
 private fun DocumentCard(
     doc: DocumentMeta,
     store: DocumentStore,
+    selecting: Boolean,
+    isSelected: Boolean,
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
     onMergeRequest: (String) -> Unit,
+    onToggleSelect: () -> Unit,
+    onEnterSelect: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     val thumbFile = doc.pages.firstOrNull()?.let { store.thumbFile(doc.id, it.id) }
     val thumb by rememberImageFile(thumbFile)
 
     Card(
-        Modifier.combinedClickable(
-            onClick = { onOpen(doc.id) },
-            onLongClick = { menu = true },
+        modifier = Modifier.combinedClickable(
+            onClick = { if (selecting) onToggleSelect() else onOpen(doc.id) },
+            onLongClick = { if (!selecting) menu = true },
         ),
+        border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
         Box(
             Modifier
@@ -236,6 +291,13 @@ private fun DocumentCard(
             )
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.action_select)) },
+                onClick = {
+                    menu = false
+                    onEnterSelect()
+                },
+            )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_merge)) },
                 onClick = {
