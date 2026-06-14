@@ -1,0 +1,38 @@
+# Build
+/build/
+**/build/
+.gradle/
+.cxx/
+
+# Local config / SDK
+local.properties
+*.local
+
+# Signing material / secrets — never commit
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+*.p12
+*.pem
+secrets.properties
+**/google-services.json
+api_keys.properties
+*.env
+.env
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling config and notes (not part of the app)
+/.claude/
+/PROJECT_RULES.md
+*.log

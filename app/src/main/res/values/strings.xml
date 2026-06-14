@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Document Scanner</string>
+    <string name="home_title">Documents</string>
+    <string name="action_scan">Scan</string>
+    <string name="empty_title">No documents yet</string>
+    <string name="empty_subtitle">Tap Scan to capture your first page.</string>
+    <string name="preview_placeholder">Select a document to preview</string>
+    <string name="posture_tabletop">Tabletop mode</string>
+</resources>
