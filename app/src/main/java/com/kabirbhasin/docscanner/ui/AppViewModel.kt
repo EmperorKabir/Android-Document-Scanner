@@ -2,6 +2,7 @@ package com.kabirbhasin.docscanner.ui
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +46,78 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun openDocument(documentId: String) {
         screen = Screen.Review(documentId)
     }
+
+    private enum class ScanMode { NEW, ADD, REPLACE }
+    private var scanMode = ScanMode.NEW
+    private var scanDocId: String? = null
+    private var scanPageId: String? = null
+
+    fun prepareNewScan() {
+        scanMode = ScanMode.NEW
+        scanDocId = null
+        scanPageId = null
+    }
+
+    fun prepareAddPage(documentId: String) {
+        scanMode = ScanMode.ADD
+        scanDocId = documentId
+    }
+
+    fun prepareRetake(documentId: String, pageId: String) {
+        scanMode = ScanMode.REPLACE
+        scanDocId = documentId
+        scanPageId = pageId
+    }
+
+    /** Import pages returned by the ML Kit document scanner (already cropped, deskewed and cleaned). */
+    fun onScanResult(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            when (scanMode) {
+                ScanMode.NEW -> {
+                    val documentId = store.newDocumentId()
+                    val pages = uris.mapNotNull { uri ->
+                        val pageId = store.newPageId()
+                        if (saveUriAsPage(documentId, pageId, uri)) PageMeta(pageId) else null
+                    }
+                    if (pages.isNotEmpty()) {
+                        store.upsert(DocumentMeta(documentId, defaultTitle(now), now, now, pages))
+                        screen = Screen.Review(documentId)
+                    }
+                }
+                ScanMode.ADD -> {
+                    val documentId = scanDocId ?: return@launch
+                    val doc = store.document(documentId) ?: return@launch
+                    val pages = uris.mapNotNull { uri ->
+                        val pageId = store.newPageId()
+                        if (saveUriAsPage(documentId, pageId, uri)) PageMeta(pageId) else null
+                    }
+                    store.upsert(doc.copy(pages = doc.pages + pages, updatedAt = now))
+                    screen = Screen.Review(documentId)
+                }
+                ScanMode.REPLACE -> {
+                    val documentId = scanDocId ?: return@launch
+                    val pageId = scanPageId ?: return@launch
+                    val doc = store.document(documentId) ?: return@launch
+                    if (saveUriAsPage(documentId, pageId, uris.first())) {
+                        val pages = doc.pages.map { if (it.id == pageId) it.copy(rev = it.rev + 1) else it }
+                        store.upsert(doc.copy(pages = pages, updatedAt = now))
+                    }
+                    screen = Screen.Review(documentId)
+                }
+            }
+        }
+    }
+
+    private suspend fun saveUriAsPage(documentId: String, pageId: String, uri: Uri): Boolean =
+        withContext(Dispatchers.IO) {
+            val bitmap = getApplication<Application>().contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it)
+            } ?: return@withContext false
+            store.savePageImage(documentId, pageId, bitmap)
+            true
+        }
 
     fun onCaptured(documentId: String, isNewDocument: Boolean, replacePageId: String?, captured: File) {
         val pageId = replacePageId ?: store.newPageId()
