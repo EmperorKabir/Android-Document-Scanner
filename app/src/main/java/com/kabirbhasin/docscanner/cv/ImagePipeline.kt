@@ -74,22 +74,110 @@ object ImagePipeline {
     private class Detection(val quad: Quad, val areaFraction: Float)
 
     private fun detectQuad(gray: IntArray, w: Int, h: Int): Detection? {
-        val t = otsu(gray)
-        return listOf(true, false)
-            .mapNotNull { bright -> largestRegionQuad(gray, w, h, t, bright) }
-            .maxByOrNull { it.areaFraction }
-            ?.takeIf { it.areaFraction >= 0.18f }
+        val blurred = boxBlur(gray, w, h, (maxOf(w, h) / 120).coerceIn(2, 8))
+        val t = otsu(blurred)
+        val candidates = ArrayList<Detection>()
+        largestMaskQuad(BooleanArray(w * h) { blurred[it] > t }, w, h)?.let { candidates.add(it) }
+        largestMaskQuad(BooleanArray(w * h) { blurred[it] <= t }, w, h)?.let { candidates.add(it) }
+        edgeEnclosedQuad(blurred, w, h)?.let { candidates.add(it) }
+        return candidates.maxByOrNull { it.areaFraction }?.takeIf { it.areaFraction >= 0.18f }
     }
 
     /**
-     * Label connected foreground pixels for the chosen polarity and return the largest region of
-     * plausible page size and high solidity, described by its four extreme corners. Solidity
-     * rejects the hollow background frame (whose extreme corners are the image corners) in favour
-     * of the solid, convex page region.
+     * Detect the page as the region enclosed by the strongest edges: flood from the image border
+     * through non-edge pixels, and whatever remains enclosed is the page. Robust when the page
+     * barely contrasts with the surface (where intensity segmentation fails).
      */
-    private fun largestRegionQuad(gray: IntArray, w: Int, h: Int, t: Int, bright: Boolean): Detection? {
+    private fun edgeEnclosedQuad(gray: IntArray, w: Int, h: Int): Detection? {
         val n = w * h
-        val fg = BooleanArray(n) { if (bright) gray[it] > t else gray[it] <= t }
+        val grad = IntArray(n)
+        var sum = 0L
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val a = gray[(y - 1) * w + x - 1]; val b = gray[(y - 1) * w + x]; val c = gray[(y - 1) * w + x + 1]
+                val d = gray[y * w + x - 1]; val e = gray[y * w + x + 1]
+                val f = gray[(y + 1) * w + x - 1]; val g = gray[(y + 1) * w + x]; val i = gray[(y + 1) * w + x + 1]
+                val gx = -a - 2 * d - f + c + 2 * e + i
+                val gy = -a - 2 * b - c + f + 2 * g + i
+                val m = abs(gx) + abs(gy)
+                grad[y * w + x] = m
+                sum += m
+            }
+        }
+        val threshold = (sum.toDouble() / n * 1.8).toInt().coerceAtLeast(24)
+        val edge = dilate(BooleanArray(n) { grad[it] > threshold }, w, h)
+
+        val outside = BooleanArray(n)
+        val seedStack = IntArray(n)
+        var ssp = 0
+        for (x in 0 until w) {
+            val top = x; val bottom = (h - 1) * w + x
+            if (!edge[top] && !outside[top]) { outside[top] = true; seedStack[ssp++] = top }
+            if (!edge[bottom] && !outside[bottom]) { outside[bottom] = true; seedStack[ssp++] = bottom }
+        }
+        for (y in 0 until h) {
+            val left = y * w; val right = y * w + w - 1
+            if (!edge[left] && !outside[left]) { outside[left] = true; seedStack[ssp++] = left }
+            if (!edge[right] && !outside[right]) { outside[right] = true; seedStack[ssp++] = right }
+        }
+        while (ssp > 0) {
+            val p = seedStack[--ssp]
+            val x = p % w; val y = p / w
+            if (x > 0) { val q = p - 1; if (!edge[q] && !outside[q]) { outside[q] = true; seedStack[ssp++] = q } }
+            if (x < w - 1) { val q = p + 1; if (!edge[q] && !outside[q]) { outside[q] = true; seedStack[ssp++] = q } }
+            if (y > 0) { val q = p - w; if (!edge[q] && !outside[q]) { outside[q] = true; seedStack[ssp++] = q } }
+            if (y < h - 1) { val q = p + w; if (!edge[q] && !outside[q]) { outside[q] = true; seedStack[ssp++] = q } }
+        }
+        return largestMaskQuad(BooleanArray(n) { !edge[it] && !outside[it] }, w, h)
+    }
+
+    private fun dilate(src: BooleanArray, w: Int, h: Int): BooleanArray {
+        val out = BooleanArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                if (!src[y * w + x]) continue
+                val y0 = (y - 1).coerceAtLeast(0); val y1 = (y + 1).coerceAtMost(h - 1)
+                val x0 = (x - 1).coerceAtLeast(0); val x1 = (x + 1).coerceAtMost(w - 1)
+                for (ny in y0..y1) for (nx in x0..x1) out[ny * w + nx] = true
+            }
+        }
+        return out
+    }
+
+    private fun boxBlur(gray: IntArray, w: Int, h: Int, radius: Int): IntArray {
+        if (radius < 1) return gray
+        val stride = w + 1
+        val integral = LongArray(stride * (h + 1))
+        for (y in 1..h) {
+            var row = 0L
+            for (x in 1..w) {
+                row += gray[(y - 1) * w + (x - 1)]
+                integral[y * stride + x] = integral[(y - 1) * stride + x] + row
+            }
+        }
+        val out = IntArray(w * h)
+        for (y in 0 until h) {
+            val y1 = (y - radius).coerceAtLeast(0); val y2 = (y + radius).coerceAtMost(h - 1)
+            for (x in 0 until w) {
+                val x1 = (x - radius).coerceAtLeast(0); val x2 = (x + radius).coerceAtMost(w - 1)
+                val area = (x2 - x1 + 1).toLong() * (y2 - y1 + 1)
+                val s = integral[(y2 + 1) * stride + (x2 + 1)] -
+                    integral[y1 * stride + (x2 + 1)] -
+                    integral[(y2 + 1) * stride + x1] +
+                    integral[y1 * stride + x1]
+                out[y * w + x] = (s / area).toInt()
+            }
+        }
+        return out
+    }
+
+    /**
+     * Largest connected foreground region of plausible page size and high solidity, described by
+     * its four extreme corners. Solidity rejects the hollow background frame (whose extreme corners
+     * are the image corners) in favour of the solid, convex page region.
+     */
+    private fun largestMaskQuad(fg: BooleanArray, w: Int, h: Int): Detection? {
+        val n = w * h
         val visited = BooleanArray(n)
         val stack = IntArray(n)
 
