@@ -8,7 +8,6 @@ composeBom = "2026.05.00"
 camerax = "1.4.2"
 window = "1.3.0"
 coroutines = "1.9.0"
-opencv = "4.11.0"
 serialization = "1.7.3"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
@@ -36,7 +35,6 @@ androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycl
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
-opencv = { group = "org.opencv", name = "opencv", version.ref = "opencv" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }

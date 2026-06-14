@@ -1,174 +1,189 @@
 package com.kabirbhasin.docscanner.cv
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
+import android.graphics.Paint
 import com.kabirbhasin.docscanner.model.FilterType
-import org.opencv.android.Utils
-import org.opencv.core.Core
-import org.opencv.core.CvType
-import org.opencv.core.Mat
-import org.opencv.core.MatOfPoint
-import org.opencv.core.MatOfPoint2f
-import org.opencv.core.Point
-import org.opencv.core.Size
-import org.opencv.imgproc.Imgproc
+import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
-/** Classic computer-vision document pipeline: edge detection, perspective correction, enhancement. */
+/**
+ * Document image pipeline built entirely on the Android graphics framework: page detection,
+ * perspective correction and enhancement filters. No native dependencies.
+ */
 object ImagePipeline {
 
-    private const val WORK_EDGE = 500.0
+    private const val DETECT_EDGE = 420
 
-    /** Detect the largest convex quadrilateral (the page). Returns null if none is found. */
-    fun detectPage(bitmap: Bitmap): Quad? {
-        val src = Mat()
-        Utils.bitmapToMat(bitmap.asArgb(), src)
+    /**
+     * Estimate the page rectangle from luminance-gradient projections. Falls back to a small
+     * inset when the borders are not clearly separable; the user can always adjust the corners.
+     */
+    fun detectPage(bitmap: Bitmap): Quad {
+        val scale = DETECT_EDGE.toFloat() / maxOf(bitmap.width, bitmap.height)
+        val w = (bitmap.width * scale).roundToInt().coerceAtLeast(2)
+        val h = (bitmap.height * scale).roundToInt().coerceAtLeast(2)
+        val small = Bitmap.createScaledBitmap(bitmap, w, h, true)
+        val pixels = IntArray(w * h)
+        small.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        val longest = maxOf(src.width(), src.height()).toDouble()
-        val scale = if (longest > WORK_EDGE) WORK_EDGE / longest else 1.0
-        val work = Mat()
-        Imgproc.resize(src, work, Size(src.width() * scale, src.height() * scale))
+        val lum = FloatArray(w * h)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            lum[i] = 0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+        }
 
-        val gray = Mat()
-        Imgproc.cvtColor(work, gray, Imgproc.COLOR_RGBA2GRAY)
-        Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
-        val edges = Mat()
-        Imgproc.Canny(gray, edges, 50.0, 150.0)
-        Imgproc.dilate(edges, edges, Mat.ones(Size(3.0, 3.0), CvType.CV_8U))
-
-        val contours = ArrayList<MatOfPoint>()
-        Imgproc.findContours(edges, contours, Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
-
-        val frameArea = work.width().toDouble() * work.height().toDouble()
-        var best: Array<Point>? = null
-        var bestArea = 0.0
-        for (contour in contours) {
-            val area = Imgproc.contourArea(contour)
-            if (area < frameArea * 0.15) continue
-            val curve = MatOfPoint2f(*contour.toArray())
-            val peri = Imgproc.arcLength(curve, true)
-            val approx = MatOfPoint2f()
-            Imgproc.approxPolyDP(curve, approx, 0.02 * peri, true)
-            if (approx.total() == 4L &&
-                area > bestArea &&
-                Imgproc.isContourConvex(MatOfPoint(*approx.toArray()))
-            ) {
-                bestArea = area
-                best = approx.toArray()
+        val colEnergy = FloatArray(w)
+        val rowEnergy = FloatArray(h)
+        for (y in 1 until h - 1) {
+            val row = y * w
+            for (x in 1 until w - 1) {
+                colEnergy[x] += abs(lum[row + x + 1] - lum[row + x - 1])
+                rowEnergy[y] += abs(lum[row + w + x] - lum[row - w + x])
             }
         }
 
-        val width = src.width().toFloat()
-        val height = src.height().toFloat()
-        val quad = best?.let { pts ->
-            val ordered = orderCorners(pts)
-            Quad.of(
-                ordered.map { p ->
-                    Corner((p.x / scale / width).toFloat(), (p.y / scale / height).toFloat())
-                },
-            )
-        }
+        val left = strongestEdge(colEnergy, 0, (w * 0.45f).toInt())
+        val right = strongestEdge(colEnergy, (w * 0.55f).toInt(), w)
+        val top = strongestEdge(rowEnergy, 0, (h * 0.45f).toInt())
+        val bottom = strongestEdge(rowEnergy, (h * 0.55f).toInt(), h)
 
-        listOf(src, work, gray, edges).forEach(Mat::release)
-        return quad
+        val separable = left != null && right != null && top != null && bottom != null &&
+            right!! - left!! > w * 0.3f && bottom!! - top!! > h * 0.3f
+        if (!separable) return insetQuad()
+
+        val lx = left!! / w.toFloat()
+        val rx = right!! / w.toFloat()
+        val ty = top!! / h.toFloat()
+        val by = bottom!! / h.toFloat()
+        return Quad(Corner(lx, ty), Corner(rx, ty), Corner(rx, by), Corner(lx, by))
     }
 
-    /** Warp the page region defined by [quad] into a flat, rectangular bitmap. */
+    /** Perspective-correct the [quad] region into a flat rectangle. */
     fun warp(bitmap: Bitmap, quad: Quad): Bitmap {
-        val src = Mat()
-        Utils.bitmapToMat(bitmap.asArgb(), src)
-
-        val w = bitmap.width.toDouble()
-        val h = bitmap.height.toDouble()
-        val tl = Point(quad.tl.x * w, quad.tl.y * h)
-        val tr = Point(quad.tr.x * w, quad.tr.y * h)
-        val br = Point(quad.br.x * w, quad.br.y * h)
-        val bl = Point(quad.bl.x * w, quad.bl.y * h)
-
-        val outW = maxOf(dist(tl, tr), dist(bl, br)).toInt().coerceAtLeast(1)
-        val outH = maxOf(dist(tl, bl), dist(tr, br)).toInt().coerceAtLeast(1)
-
-        val srcPts = MatOfPoint2f(tl, tr, br, bl)
-        val dstPts = MatOfPoint2f(
-            Point(0.0, 0.0),
-            Point(outW - 1.0, 0.0),
-            Point(outW - 1.0, outH - 1.0),
-            Point(0.0, outH - 1.0),
+        val w = bitmap.width.toFloat()
+        val h = bitmap.height.toFloat()
+        val src = floatArrayOf(
+            quad.tl.x * w, quad.tl.y * h,
+            quad.tr.x * w, quad.tr.y * h,
+            quad.br.x * w, quad.br.y * h,
+            quad.bl.x * w, quad.bl.y * h,
         )
-        val transform = Imgproc.getPerspectiveTransform(srcPts, dstPts)
-        val out = Mat()
-        Imgproc.warpPerspective(src, out, transform, Size(outW.toDouble(), outH.toDouble()))
+        val outW = maxOf(dist(src, 0, 2), dist(src, 6, 4)).roundToInt().coerceAtLeast(1)
+        val outH = maxOf(dist(src, 0, 6), dist(src, 2, 4)).roundToInt().coerceAtLeast(1)
+        val dst = floatArrayOf(
+            0f, 0f,
+            outW.toFloat(), 0f,
+            outW.toFloat(), outH.toFloat(),
+            0f, outH.toFloat(),
+        )
 
-        val result = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(out, result)
-        listOf(src, out, transform).forEach(Mat::release)
-        return result
+        val matrix = Matrix().apply { setPolyToPoly(src, 0, dst, 0, 4) }
+        val output = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        Canvas(output).drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        return output
     }
 
-    /** Apply an enhancement filter, returning a new bitmap. */
-    fun applyFilter(bitmap: Bitmap, filter: FilterType): Bitmap {
-        if (filter == FilterType.ORIGINAL) return bitmap
+    fun applyFilter(bitmap: Bitmap, filter: FilterType): Bitmap = when (filter) {
+        FilterType.ORIGINAL -> bitmap
+        FilterType.GREYSCALE -> withColorMatrix(bitmap, ColorMatrix().apply { setSaturation(0f) })
+        FilterType.MAGIC -> withColorMatrix(bitmap, magicMatrix())
+        FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
+    }
 
-        val src = Mat()
-        Utils.bitmapToMat(bitmap.asArgb(), src)
-        val out = Mat()
-        when (filter) {
-            FilterType.GREYSCALE -> {
-                Imgproc.cvtColor(src, out, Imgproc.COLOR_RGBA2GRAY)
-                Imgproc.cvtColor(out, out, Imgproc.COLOR_GRAY2RGBA)
+    private fun strongestEdge(energy: FloatArray, from: Int, to: Int): Int? {
+        val end = to.coerceAtMost(energy.size)
+        if (from >= end) return null
+        val mean = energy.average().toFloat()
+        var best = -1
+        var bestValue = 0f
+        for (i in from until end) {
+            if (energy[i] > bestValue && energy[i] > mean * 1.5f) {
+                bestValue = energy[i]
+                best = i
             }
-            FilterType.BLACK_WHITE -> {
-                val gray = Mat()
-                Imgproc.cvtColor(src, gray, Imgproc.COLOR_RGBA2GRAY)
-                Imgproc.adaptiveThreshold(
-                    gray, gray, 255.0,
-                    Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY, 15, 10.0,
-                )
-                Imgproc.cvtColor(gray, out, Imgproc.COLOR_GRAY2RGBA)
-                gray.release()
-            }
-            FilterType.MAGIC -> magicColour(src, out)
-            FilterType.ORIGINAL -> src.copyTo(out)
+        }
+        return if (best >= 0) best else null
+    }
+
+    private fun insetQuad(): Quad {
+        val m = 0.06f
+        return Quad(Corner(m, m), Corner(1f - m, m), Corner(1f - m, 1f - m), Corner(m, 1f - m))
+    }
+
+    private fun withColorMatrix(src: Bitmap, matrix: ColorMatrix): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { colorFilter = ColorMatrixColorFilter(matrix) }
+        Canvas(out).drawBitmap(src, 0f, 0f, paint)
+        return out
+    }
+
+    private fun magicMatrix(): ColorMatrix {
+        val contrast = 1.25f
+        val translate = (-0.5f * contrast + 0.5f) * 255f
+        val matrix = ColorMatrix(
+            floatArrayOf(
+                contrast, 0f, 0f, 0f, translate,
+                0f, contrast, 0f, 0f, translate,
+                0f, 0f, contrast, 0f, translate,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        )
+        matrix.postConcat(ColorMatrix().apply { setSaturation(1.15f) })
+        return matrix
+    }
+
+    /** Local adaptive threshold using an integral image, producing a clean bi-level scan. */
+    private fun adaptiveThreshold(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        val pixels = IntArray(w * h)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val gray = IntArray(w * h)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            gray[i] = (0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)).toInt()
         }
 
-        val result = Bitmap.createBitmap(out.width(), out.height(), Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(out, result)
-        src.release()
-        out.release()
+        val stride = w + 1
+        val integral = LongArray(stride * (h + 1))
+        for (y in 1..h) {
+            var rowSum = 0L
+            for (x in 1..w) {
+                rowSum += gray[(y - 1) * w + (x - 1)]
+                integral[y * stride + x] = integral[(y - 1) * stride + x] + rowSum
+            }
+        }
+
+        val radius = (maxOf(w, h) / 32).coerceIn(8, 40)
+        val cFactor = 0.85
+        val out = IntArray(w * h)
+        for (y in 0 until h) {
+            val y1 = (y - radius).coerceAtLeast(0)
+            val y2 = (y + radius).coerceAtMost(h - 1)
+            for (x in 0 until w) {
+                val x1 = (x - radius).coerceAtLeast(0)
+                val x2 = (x + radius).coerceAtMost(w - 1)
+                val area = (x2 - x1 + 1).toLong() * (y2 - y1 + 1)
+                val sum = integral[(y2 + 1) * stride + (x2 + 1)] -
+                    integral[y1 * stride + (x2 + 1)] -
+                    integral[(y2 + 1) * stride + x1] +
+                    integral[y1 * stride + x1]
+                val mean = sum.toDouble() / area
+                val v = if (gray[y * w + x] > mean * cFactor) 0xFF else 0x00
+                out[y * w + x] = (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+            }
+        }
+
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(out, 0, w, 0, 0, w, h)
         return result
     }
 
-    private fun magicColour(src: Mat, out: Mat) {
-        val lab = Mat()
-        Imgproc.cvtColor(src, lab, Imgproc.COLOR_RGBA2RGB)
-        Imgproc.cvtColor(lab, lab, Imgproc.COLOR_RGB2Lab)
-
-        val channels = ArrayList<Mat>()
-        Core.split(lab, channels)
-        val clahe = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
-        clahe.apply(channels[0], channels[0])
-        Core.merge(channels, lab)
-
-        val rgb = Mat()
-        Imgproc.cvtColor(lab, rgb, Imgproc.COLOR_Lab2RGB)
-        val blur = Mat()
-        Imgproc.GaussianBlur(rgb, blur, Size(0.0, 0.0), 3.0)
-        Core.addWeighted(rgb, 1.5, blur, -0.5, 0.0, rgb)
-        Imgproc.cvtColor(rgb, out, Imgproc.COLOR_RGB2RGBA)
-
-        listOf(lab, rgb, blur).forEach(Mat::release)
-        channels.forEach(Mat::release)
-    }
-
-    private fun orderCorners(p: Array<Point>): List<Point> {
-        val tl = p.minByOrNull { it.x + it.y }!!
-        val br = p.maxByOrNull { it.x + it.y }!!
-        val tr = p.minByOrNull { it.y - it.x }!!
-        val bl = p.maxByOrNull { it.y - it.x }!!
-        return listOf(tl, tr, br, bl)
-    }
-
-    private fun dist(a: Point, b: Point): Double = hypot(a.x - b.x, a.y - b.y)
-
-    private fun Bitmap.asArgb(): Bitmap =
-        if (config == Bitmap.Config.ARGB_8888) this else copy(Bitmap.Config.ARGB_8888, false)
+    private fun dist(p: FloatArray, a: Int, b: Int): Float = hypot(p[a] - p[b], p[a + 1] - p[b + 1])
 }
