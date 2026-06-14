@@ -3,7 +3,7 @@ package com.kabirbhasin.docscanner.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class FilterType { ORIGINAL, GREYSCALE, BLACK_WHITE, MAGIC }
+enum class FilterType { ORIGINAL, GREYSCALE, BLACK_WHITE, MAGIC, LIGHTEN }
 
 @Serializable
 data class PageMeta(

@@ -65,7 +65,8 @@ object ImagePipeline {
     fun applyFilter(bitmap: Bitmap, filter: FilterType): Bitmap = when (filter) {
         FilterType.ORIGINAL -> bitmap
         FilterType.GREYSCALE -> withColorMatrix(bitmap, ColorMatrix().apply { setSaturation(0f) })
-        FilterType.MAGIC -> magicScan(bitmap)
+        FilterType.MAGIC -> magicScan(bitmap, 0.97f)
+        FilterType.LIGHTEN -> magicScan(bitmap, 1.08f)
         FilterType.BLACK_WHITE -> adaptiveThreshold(bitmap)
     }
 
@@ -286,7 +287,7 @@ object ImagePipeline {
      * then divide each pixel by it. This whitens the paper, removes shadows and uneven lighting, and
      * preserves ink — the look of a sheet scanned on a flatbed.
      */
-    private fun magicScan(src: Bitmap): Bitmap {
+    private fun magicScan(src: Bitmap, gainFactor: Float): Bitmap {
         val w = src.width
         val h = src.height
         val sw = (w / 10).coerceAtLeast(1)
@@ -298,7 +299,7 @@ object ImagePipeline {
         val px = IntArray(w * h)
         src.getPixels(px, 0, w, 0, 0, w, h)
         val out = IntArray(w * h)
-        val gain = 255f * 0.97f
+        val gain = 255f * gainFactor
         for (y in 0 until h) {
             val sy = (y * sh / h).coerceIn(0, sh - 1)
             for (x in 0 until w) {

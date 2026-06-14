@@ -68,6 +68,7 @@ fun ReviewScreen(
     onMovePage: (String, Int) -> Unit,
     onRotate: (String) -> Unit,
     onSign: (String) -> Unit,
+    onRetake: (String) -> Unit,
     onRename: (String) -> Unit,
     onSetWatermark: (String) -> Unit,
 ) {
@@ -82,6 +83,7 @@ fun ReviewScreen(
     var showRename by remember { mutableStateOf(false) }
     var showWatermark by remember { mutableStateOf(false) }
     var exportMenu by remember { mutableStateOf(false) }
+    var pageMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -194,16 +196,30 @@ fun ReviewScreen(
                         )
                     }
                     Spacer(Modifier.weight(1f))
-                    IconButton(onClick = { onRotate(current.id) }) {
-                        Icon(painterResource(R.drawable.ic_rotate), stringResource(R.string.action_rotate))
-                    }
-                    IconButton(onClick = { onSign(current.id) }) {
-                        Icon(painterResource(R.drawable.ic_sign), stringResource(R.string.action_sign))
-                    }
-                    IconButton(onClick = { onDeletePage(current.id) }) {
-                        Icon(painterResource(R.drawable.ic_delete), stringResource(R.string.action_delete))
-                    }
                     Button(onClick = onAddPage) { Text(stringResource(R.string.action_add_page)) }
+                    Box {
+                        IconButton(onClick = { pageMenu = true }) {
+                            Icon(painterResource(R.drawable.ic_more), stringResource(R.string.action_more))
+                        }
+                        DropdownMenu(expanded = pageMenu, onDismissRequest = { pageMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_rotate)) },
+                                onClick = { pageMenu = false; onRotate(current.id) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_sign)) },
+                                onClick = { pageMenu = false; onSign(current.id) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_retake)) },
+                                onClick = { pageMenu = false; onRetake(current.id) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_delete)) },
+                                onClick = { pageMenu = false; onDeletePage(current.id) },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -271,9 +287,10 @@ private fun TextEntryDialog(
 private fun FilterRow(selected: FilterType, onSelect: (FilterType) -> Unit) {
     val options = listOf(
         FilterType.ORIGINAL to R.string.filter_original,
+        FilterType.MAGIC to R.string.filter_magic,
+        FilterType.LIGHTEN to R.string.filter_lighten,
         FilterType.GREYSCALE to R.string.filter_greyscale,
         FilterType.BLACK_WHITE to R.string.filter_bw,
-        FilterType.MAGIC to R.string.filter_magic,
     )
     Row(
         Modifier

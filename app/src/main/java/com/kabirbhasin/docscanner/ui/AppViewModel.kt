@@ -47,12 +47,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.Review(documentId)
     }
 
-    fun onCaptured(documentId: String, isNewDocument: Boolean, captured: File) {
-        val pageId = store.newPageId()
+    fun onCaptured(documentId: String, isNewDocument: Boolean, replacePageId: String?, captured: File) {
+        val pageId = replacePageId ?: store.newPageId()
         val raw = rawFile(pageId)
         captured.copyTo(raw, overwrite = true)
         captured.delete()
         screen = Screen.Crop(documentId, pageId, isNewDocument, raw.absolutePath)
+    }
+
+    fun startRetake(documentId: String, pageId: String) {
+        screen = Screen.Camera(documentId, isNewDocument = false, replacePageId = pageId)
     }
 
     fun addBatchPage(documentId: String, captured: File) {
@@ -116,8 +120,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
             val now = System.currentTimeMillis()
             val existing = store.document(documentId)
+            val isReplace = existing?.pages?.any { it.id == pageId } == true
+            val pages = if (isReplace) {
+                existing!!.pages.map { if (it.id == pageId) it.copy(rev = it.rev + 1) else it }
+            } else {
+                (existing?.pages ?: emptyList()) + PageMeta(pageId, FilterType.MAGIC)
+            }
             val base = existing ?: DocumentMeta(documentId, defaultTitle(now), now, now)
-            store.upsert(base.copy(pages = base.pages + PageMeta(pageId, FilterType.MAGIC), updatedAt = now))
+            store.upsert(base.copy(pages = pages, updatedAt = now))
             screen = Screen.Review(documentId)
         }
     }

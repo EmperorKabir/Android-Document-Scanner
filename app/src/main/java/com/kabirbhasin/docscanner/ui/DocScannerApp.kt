@@ -53,7 +53,7 @@ fun DocScannerApp(
                 lastThumb = lastPage?.let { viewModel.store.thumbFile(s.documentId, it.id) },
                 onCaptured = { file, batch ->
                     if (batch) viewModel.addBatchPage(s.documentId, file)
-                    else viewModel.onCaptured(s.documentId, s.isNewDocument, file)
+                    else viewModel.onCaptured(s.documentId, s.isNewDocument, s.replacePageId, file)
                 },
                 onDone = {
                     if ((workingDoc?.pages?.size ?: 0) > 0) viewModel.openDocument(s.documentId)
@@ -80,6 +80,7 @@ fun DocScannerApp(
             onMovePage = { pageId, delta -> viewModel.movePage(s.documentId, pageId, delta) },
             onRotate = { pageId -> viewModel.rotatePage(s.documentId, pageId) },
             onSign = { pageId -> viewModel.startSignature(s.documentId, pageId) },
+            onRetake = { pageId -> viewModel.startRetake(s.documentId, pageId) },
             onRename = { title -> viewModel.renameDocument(s.documentId, title) },
             onSetWatermark = { text -> viewModel.setWatermark(s.documentId, text) },
         )

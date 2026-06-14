@@ -20,6 +20,7 @@
     <string name="action_use">Use</string>
     <string name="action_capture">Capture</string>
     <string name="action_done">Done</string>
+    <string name="action_more">More</string>
     <string name="mode_single">Single</string>
     <string name="mode_batch">Batch</string>
     <string name="batch_done">Done · %1$d</string>
@@ -30,6 +31,7 @@
     <string name="filter_greyscale">Greyscale</string>
     <string name="filter_bw">B &amp; W</string>
     <string name="filter_magic">Magic</string>
+    <string name="filter_lighten">Lighten</string>
     <string name="camera_permission_rationale">Camera access is needed to scan documents.</string>
     <string name="grant_access">Grant access</string>
     <string name="rename_hint">Document name</string>
